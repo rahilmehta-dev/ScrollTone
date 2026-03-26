@@ -1,0 +1,35 @@
+version: "3.9"
+
+# Memory guide — set mem_limit based on how many parallel workers you use:
+#   1 worker  (default) →  mem_limit: 3g
+#   2 workers           →  mem_limit: 5g
+#   3 workers           →  mem_limit: 7g
+#   4 workers           →  mem_limit: 9g
+#
+# Exit code 137 = OOM kill → increase mem_limit or reduce workers in the UI.
+
+services:
+  scrolltone:
+    build: .
+    container_name: scrolltone
+    ports:
+      - "7860:7860"
+    volumes:
+      # Persist generated audiobooks across restarts
+      - scrolltone-outputs:/tmp/tts_outputs
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    mem_limit: 20g
+    memswap_limit: 22g   # 2 g of swap headroom on top of RAM (prevents OOM on spikes)
+    # Uncomment for GPU support (requires nvidia-docker):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  scrolltone-outputs:

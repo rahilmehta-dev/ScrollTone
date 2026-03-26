@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+*.md
+# Old CLI scripts — not needed in the web app image
+tts_app.py
+epub_to_audiobook.py
+# generate_previews.py is needed at build time — do NOT ignore it
+# Sample EPUB / output — don't bloat the image
+*.epub
+audiobook_output/
+# Python env
+.venv/
+env/
+venv/
+*.egg-info/
