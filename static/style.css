@@ -1,0 +1,653 @@
+/* ── Reset ───────────────────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+/* ── Variables ───────────────────────────────────────────────────────────── */
+:root{
+  --bg:        rgb(36,36,42);
+  --surface:   rgb(36,36,42);
+  /* Input wells are noticeably darker — the key to readable neumorphic fields */
+  --well:      rgb(26,26,32);
+
+  /* Neumorphic shadows — tuned for rgb(36,36,42) */
+  --r:  -5px -5px 14px rgba(255,255,255,.06),  6px 6px 20px rgba(0,0,0,.7);
+  --r-s:-3px -3px  8px rgba(255,255,255,.05),  4px 4px 12px rgba(0,0,0,.65);
+  --r-i: inset -3px -3px 8px rgba(255,255,255,.05), inset 5px 5px 16px rgba(0,0,0,.75);
+
+  --accent:   #7c3aed;
+  --accent-b: #6d28d9;
+  --accent-lo:rgba(124,58,237,.22);
+  --success:  #10b981;
+  --danger:   #ef4444;
+  --warning:  #f59e0b;
+
+  --txt:  rgba(255,255,255,.92);
+  --txt-m:rgba(255,255,255,.55);   /* labels — bumped up for readability */
+  --txt-s:rgba(255,255,255,.30);
+
+  --radius:16px;
+  --radius-s:11px;
+}
+
+/* ── Body ────────────────────────────────────────────────────────────────── */
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:var(--bg);color:var(--txt);
+  min-height:100vh;font-size:15px;overflow-x:hidden;
+}
+
+
+/* ── Brand section ───────────────────────────────────────────────────────── */
+.brand{
+  display:flex;justify-content:center;
+  padding:52px 0 36px;
+  user-select:none;
+}
+/* Inset container = "pressed into the material" = true neumorphic emboss */
+.brand-inset{
+  display:inline-flex;align-items:center;gap:22px;
+  padding:20px 44px;
+  border-radius:20px;
+  animation:brandIn .7s cubic-bezier(.22,1,.36,1) both, brandFloat 5s ease-in-out 1s infinite;
+  box-shadow:
+    inset -4px -4px 10px rgba(255,255,255,.07),
+    inset 5px  5px  18px rgba(0,0,0,.65);
+}
+.brand-name{
+  font-size:2rem;font-weight:900;letter-spacing:-.05em;
+  color:rgba(255,255,255,.78);
+  line-height:1;
+}
+.brand-name em{
+  font-style:normal;
+  color:#9d6fff;
+}
+.brand-sep{
+  width:1px;height:28px;
+  background:rgba(255,255,255,.08);
+  box-shadow:-1px 0 2px rgba(0,0,0,.4),1px 0 1px rgba(255,255,255,.04);
+}
+.brand-sub{
+  display:flex;flex-direction:column;gap:3px;
+}
+.brand-sub-top{
+  font-size:.65rem;font-weight:700;letter-spacing:.13em;
+  text-transform:uppercase;color:rgba(255,255,255,.28);
+}
+.brand-sub-bot{
+  font-size:.62rem;font-weight:500;letter-spacing:.06em;
+  color:rgba(255,255,255,.18);
+}
+
+/* ── Layout ──────────────────────────────────────────────────────────────── */
+main{
+  position:relative;z-index:1;
+  max-width:1160px;margin:0 auto;
+  padding:0 44px 44px;
+}
+main.has-job{ max-width:1160px; }
+@media(max-width:900px){main{padding:0 16px 24px}.brand{padding:28px 0 22px}.brand-name{font-size:1.5rem}.brand-inset{padding:14px 24px;gap:14px}}
+
+/* 2-column settings grid */
+.left-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:28px;
+  align-items:stretch;   /* both columns same height */
+  margin-bottom:28px;
+}
+.col{display:flex;flex-direction:column;gap:28px;height:100%}
+
+/* Cards in the grid fill their column */
+.left-grid>.col>.card{
+  height:100%;
+  display:flex;flex-direction:column;
+}
+
+/* Left card: upload zone grows to fill the gap */
+.left-grid>.col:first-child>.card>.field:first-child{
+  flex:1;display:flex;flex-direction:column;
+}
+.left-grid>.col:first-child>.card>.field:first-child .upload-zone{
+  flex:1;min-height:120px;
+}
+
+/* Right card: distribute sections evenly top-to-bottom */
+.left-grid>.col:last-child>.card{
+  justify-content:space-between;
+}
+@media(max-width:700px){
+  .left-grid{grid-template-columns:1fr}
+}
+
+/* ── Left panel transitions ──────────────────────────────────────────────── */
+#left.slide-out{
+  animation:leftOut .25s ease forwards;
+  pointer-events:none;
+}
+@keyframes leftOut{
+  to{opacity:0;transform:translateX(-20px)}
+}
+
+/* ── Neumorphic Card ─────────────────────────────────────────────────────── */
+.card{
+  background:var(--surface);border-radius:var(--radius);
+  padding:28px 30px;
+  box-shadow:var(--r);
+  animation:fadeUp .5s ease both;
+  transition:box-shadow .25s ease, transform .25s ease;
+}
+.card:hover{
+  box-shadow:
+    -7px -7px 18px rgba(255,255,255,.065),
+     8px  8px 24px rgba(0,0,0,.78);
+  transform:translateY(-3px);
+}
+@keyframes fadeUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+@keyframes brandIn{from{opacity:0;transform:translateY(-12px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes brandFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+/* Stagger cards in each column */
+.col .card:nth-child(1){animation-delay:.04s}
+.col .card:nth-child(2){animation-delay:.14s}
+.col:last-child .card:nth-child(1){animation-delay:.08s}
+.col:last-child .card:nth-child(2){animation-delay:.18s}
+.out-sticky .card:nth-child(1){animation-delay:.05s}
+.out-sticky .card:nth-child(2){animation-delay:.1s}
+.out-sticky .card:nth-child(3){animation-delay:.15s}
+
+/* Section label */
+.sect{
+  font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;
+  color:var(--txt-m);margin-bottom:20px;
+}
+/* Divider */
+.div{height:1px;background:rgba(255,255,255,.05);margin:22px 0}
+
+/* ── Upload Zone ─────────────────────────────────────────────────────────── */
+.upload-zone{
+  border-radius:var(--radius-s);padding:38px 24px;
+  text-align:center;cursor:pointer;transition:all .25s;
+  box-shadow:var(--r-i);background:var(--well);
+}
+.upload-zone:hover,.upload-zone.drag-over{
+  box-shadow:inset -4px -4px 10px rgba(255,255,255,.05),inset 5px 5px 16px rgba(0,0,0,.75);
+}
+.upload-zone.has-file{
+  box-shadow:inset -3px -3px 7px rgba(255,255,255,.04),
+             inset 4px 4px 13px rgba(0,0,0,.72),
+             0 0 0 1px rgba(16,185,129,.25);
+}
+.up-icon{font-size:2.1rem;margin-bottom:9px;display:block;transition:transform .25s}
+@keyframes iconBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+.upload-zone:hover .up-icon,.upload-zone.drag-over .up-icon{animation:iconBob .7s ease-in-out infinite}
+.up-title{font-weight:600;font-size:.88rem}
+.up-sub  {font-size:.76rem;color:var(--txt-s);margin-top:3px}
+.up-name {font-size:.8rem;font-weight:600;color:var(--success);margin-top:8px}
+
+/* ── Form elements ───────────────────────────────────────────────────────── */
+.field{margin-bottom:22px}
+.field:last-child{margin-bottom:0}
+label{
+  display:flex;align-items:center;gap:6px;
+  font-size:.8rem;font-weight:600;
+  color:var(--txt-m);margin-bottom:7px;letter-spacing:.01em;
+}
+
+/* ── Info tooltip ─────────────────────────────────────────────────────────── */
+.tip{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:14px;height:14px;border-radius:50%;flex-shrink:0;
+  background:var(--well);color:var(--txt-s);
+  font-size:.6rem;font-style:normal;font-weight:700;
+  cursor:help;box-shadow:var(--r-s);
+  position:relative;
+}
+.tip::after{
+  content:attr(data-tip);
+  position:absolute;bottom:calc(100% + 9px);left:50%;
+  transform:translateX(-50%);
+  width:240px;max-width:90vw;
+  background:rgb(26,26,32);color:rgba(255,255,255,.88);
+  font-size:.73rem;line-height:1.55;font-weight:400;
+  padding:10px 13px;border-radius:11px;
+  box-shadow:0 6px 24px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.05);
+  pointer-events:none;opacity:0;transition:opacity .18s;
+  white-space:normal;z-index:300;letter-spacing:0;
+}
+.tip::before{
+  content:'';position:absolute;bottom:calc(100% + 4px);left:50%;
+  transform:translateX(-50%);
+  border:5px solid transparent;border-top-color:rgb(26,26,32);
+  pointer-events:none;opacity:0;transition:opacity .18s;z-index:300;
+}
+.tip:hover::after,.tip:hover::before{opacity:1}
+
+select,input[type=number],input[type=text]{
+  width:100%;
+  /* Darker well color — visually separate from the card surface */
+  background:var(--well);
+  border:none;outline:none;border-radius:var(--radius-s);
+  padding:11px 15px;font-size:.9rem;
+  /* Bright text so content is always easy to read */
+  color:var(--txt);
+  box-shadow:var(--r-i);
+  transition:box-shadow .2s,background .2s;
+  -webkit-appearance:none;appearance:none;
+}
+select{
+  /* Lighter chevron — clearly visible against the dark well */
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%239CA3AF' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 13px center;background-size:15px;
+  padding-right:38px;background-color:var(--well);cursor:pointer;
+}
+select option{background:rgb(22,22,28);color:var(--txt)}
+select:focus,input[type=number]:focus,input[type=text]:focus{
+  background:rgb(30,30,36);
+  box-shadow:var(--r-i),0 0 0 2px rgba(124,58,237,.5);
+}
+select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,30,36)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+/* ── Checkbox ────────────────────────────────────────────────────────────── */
+.chk{
+  display:flex;align-items:center;gap:10px;cursor:pointer;
+  font-size:.86rem;color:var(--txt-m);user-select:none;
+}
+.chk input[type=checkbox]{
+  width:18px;height:18px;padding:0;cursor:pointer;flex-shrink:0;
+  -webkit-appearance:none;appearance:none;border-radius:5px;
+  background:var(--well);box-shadow:var(--r-i);
+  transition:all .2s;position:relative;
+}
+.chk input[type=checkbox]:checked{
+  background:var(--accent);
+  box-shadow:var(--r-i),0 0 10px rgba(124,58,237,.4);
+}
+.chk input[type=checkbox]:checked::after{
+  content:'✓';position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:.72rem;color:#fff;font-weight:700;
+}
+
+/* ── Speed Slider ────────────────────────────────────────────────────────── */
+.speed-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.speed-val{
+  font-size:1.1rem;font-weight:800;color:#8b5cf6;
+  transition:transform .15s ease,opacity .15s ease;
+}
+.speed-val.bump{animation:valBump .2s ease both}
+@keyframes valBump{0%{transform:scale(1)}50%{transform:scale(1.25)}100%{transform:scale(1)}}
+
+.speed-row{display:flex;align-items:center}
+.speed-row input[type=range]{
+  width:100%;-webkit-appearance:none;appearance:none;
+  height:5px;background:transparent;outline:none;
+  cursor:pointer;border:none;padding:0;
+  box-shadow:var(--r-i);border-radius:99px;
+}
+.speed-row input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:22px;height:22px;border-radius:50%;
+  background:linear-gradient(135deg,#8b5cf6,#6d28d9);cursor:pointer;
+  box-shadow:-3px -3px 6px rgba(255,255,255,.08),4px 4px 10px rgba(0,0,0,.6),
+             0 0 14px rgba(124,58,237,.5);
+  transition:box-shadow .2s,transform .15s;
+}
+.speed-row input[type=range]::-webkit-slider-thumb:hover{
+  transform:scale(1.15);
+  box-shadow:-3px -3px 6px rgba(255,255,255,.08),4px 4px 10px rgba(0,0,0,.6),
+             0 0 22px rgba(124,58,237,.7);
+}
+
+/* Dot tick markers — absolute positioned to match exact slider % */
+.speed-ticks{
+  position:relative;
+  height:44px;        /* room for dot + label */
+  margin-top:20px;
+  padding:0 11px;     /* matches half thumb-width so 0% and 100% align */
+}
+.stk{
+  position:absolute;
+  top:0;
+  transform:translateX(-50%);
+  display:flex;flex-direction:column;align-items:center;gap:6px;
+  background:none;border:none;cursor:pointer;padding:4px 0;
+  transition:transform .15s;
+  white-space:nowrap;
+}
+.stk:hover{transform:translateX(-50%) translateY(-2px)}
+.stk:active{transform:translateX(-50%) translateY(0)}
+.stk-dot{
+  width:7px;height:7px;border-radius:50%;
+  background:rgba(255,255,255,.12);
+  box-shadow:var(--r-s);
+  transition:background .2s,box-shadow .2s,transform .2s;
+}
+.stk:hover .stk-dot{
+  background:#8b5cf6;
+  box-shadow:0 0 10px rgba(124,58,237,.6),var(--r-s);
+  transform:scale(1.3);
+}
+.stk.active .stk-dot{
+  background:#7c3aed;
+  box-shadow:0 0 12px rgba(124,58,237,.7),var(--r-s);
+  transform:scale(1.4);
+}
+.stk.active .stk-lbl{color:#a78bfa}
+.stk.active{transform:translateX(-50%)}
+.stk-lbl{
+  font-size:.76rem;font-weight:700;letter-spacing:.01em;
+  color:rgba(255,255,255,.5);transition:color .2s;
+}
+.stk:hover .stk-lbl{color:#a78bfa}
+
+/* ── Format Pills ────────────────────────────────────────────────────────── */
+.pill-group{display:flex;gap:8px}
+.pill{
+  display:inline-flex;align-items:center;gap:6px;padding:8px 20px;
+  border-radius:99px;cursor:pointer;font-size:.84rem;color:var(--txt-m);
+  background:var(--well);box-shadow:var(--r-i);
+  transition:all .2s;user-select:none;border:none;
+}
+.pill:has(input:checked){
+  color:#fff;font-weight:600;
+  background:var(--accent);
+  box-shadow:-3px -3px 8px rgba(255,255,255,.08),4px 4px 12px rgba(0,0,0,.5),
+             0 0 14px rgba(124,58,237,.35);
+}
+.pill input{display:none}
+
+/* ── Options bar (full-width compact row) ────────────────────────────────── */
+.opts-card{ margin-bottom:28px; }
+.opts-bar{
+  display:flex;align-items:center;gap:28px;flex-wrap:wrap;
+}
+.opts-sep{
+  width:1px;height:28px;flex-shrink:0;
+  background:rgba(255,255,255,.07);
+}
+/* Advanced 6-up grid inside expanded section */
+.adv-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:22px 28px;
+}
+@media(max-width:700px){
+  .adv-grid{grid-template-columns:1fr}
+  .opts-sep{display:none}
+  .opts-bar{gap:14px}
+}
+
+/* ── Advanced toggle ─────────────────────────────────────────────────────── */
+.adv-btn{
+  display:flex;align-items:center;gap:7px;background:none;border:none;
+  cursor:pointer;font-size:.78rem;font-weight:500;color:var(--txt-s);
+  padding:6px 0;transition:color .2s;
+}
+.adv-btn:hover{color:#8b5cf6}
+.adv-btn .arr{transition:transform .25s;font-size:.68rem}
+.adv-btn.open .arr{transform:rotate(90deg)}
+/* Advanced section — smooth grid expand */
+.adv-wrap{display:grid;grid-template-rows:0fr;transition:grid-template-rows .35s cubic-bezier(.4,0,.2,1)}
+.adv-wrap.open{grid-template-rows:1fr}
+.adv-wrap>div{overflow:hidden}
+
+/* ── Preview button ──────────────────────────────────────────────────────── */
+.btn-preview{
+  width:38px;height:38px;border-radius:10px;flex-shrink:0;
+  border:none;cursor:pointer;background:var(--surface);
+  color:#8b5cf6;font-size:.9rem;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:var(--r-s);transition:all .2s;padding:0;
+}
+.btn-preview:hover:not(:disabled){
+  color:#a78bfa;
+  box-shadow:-4px -4px 10px rgba(255,255,255,.08),5px 5px 14px rgba(0,0,0,.5);
+}
+.btn-preview:active:not(:disabled){
+  box-shadow:var(--r-i);color:#7c3aed;
+}
+.btn-preview.playing{
+  box-shadow:var(--r-i),0 0 0 1px rgba(124,58,237,.45);
+  color:#a78bfa;
+}
+.btn-preview:disabled{color:var(--txt-s);cursor:not-allowed}
+
+/* ── Start button — neumorphic raised ────────────────────────────────────── */
+.btn-start{
+  display:block;width:100%;padding:20px;margin-top:4px;
+  background:var(--surface);
+  color:#a78bfa;border:none;border-radius:var(--radius);
+  font-size:1rem;font-weight:800;cursor:pointer;letter-spacing:.06em;
+  text-transform:uppercase;position:relative;
+  box-shadow:
+    -5px -5px 14px rgba(255,255,255,.06),
+     6px  6px 20px rgba(0,0,0,.72),
+     0 0 0 1px rgba(124,58,237,.18);
+  transition:all .2s ease;
+  animation:fadeUp .45s .2s ease both;
+}
+/* Pulse ring lives on ::after so it doesn't conflict with hover box-shadow */
+@keyframes btnRing{
+  0%,100%{border-color:rgba(124,58,237,.0);box-shadow:none}
+  50%    {border-color:rgba(124,58,237,.55);box-shadow:0 0 18px rgba(124,58,237,.2)}
+}
+.btn-start::after{
+  content:'';position:absolute;inset:-1px;
+  border-radius:inherit;border:1.5px solid rgba(124,58,237,.0);
+  pointer-events:none;
+}
+.btn-start:not(:disabled)::after{animation:btnRing 3s 1.5s ease-in-out infinite}
+.btn-start:disabled::after{animation:none}
+.btn-start:hover:not(:disabled){
+  color:#c4b5fd;
+  box-shadow:
+    -6px -6px 16px rgba(255,255,255,.07),
+     7px  7px 22px rgba(0,0,0,.78),
+     0 0 0 1px rgba(124,58,237,.35),
+     0 0 24px rgba(124,58,237,.2);
+  transform:translateY(-2px);
+}
+.btn-start:active:not(:disabled){
+  transform:translateY(0);
+  box-shadow:
+    inset -3px -3px 8px rgba(255,255,255,.05),
+    inset  4px  4px 14px rgba(0,0,0,.75),
+    0 0 0 1px rgba(124,58,237,.25);
+  color:#8b5cf6;
+}
+.btn-start:disabled{
+  color:rgba(139,92,246,.3);cursor:not-allowed;
+  box-shadow:
+    -3px -3px 8px rgba(255,255,255,.03),
+     4px  4px 12px rgba(0,0,0,.6);
+}
+
+/* ── Small buttons ───────────────────────────────────────────────────────── */
+.btn-stop{
+  display:none;padding:7px 16px;border:none;cursor:pointer;
+  background:var(--surface);color:#fca5a5;border-radius:9px;
+  font-size:.82rem;font-weight:600;
+  box-shadow:var(--r-s);transition:all .2s;
+}
+.btn-stop:hover{box-shadow:-4px -4px 10px rgba(255,255,255,.08),5px 5px 14px rgba(0,0,0,.5);color:#ef4444}
+.btn-stop:active{box-shadow:var(--r-i)}
+
+.btn-sm{
+  display:inline-flex;align-items:center;gap:5px;padding:6px 13px;
+  background:var(--surface);border:none;cursor:pointer;
+  color:var(--txt-m);border-radius:8px;font-size:.78rem;
+  box-shadow:var(--r-s);transition:all .2s;text-decoration:none;
+}
+.btn-sm:hover{color:var(--txt);box-shadow:-4px -4px 10px rgba(255,255,255,.08),5px 5px 14px rgba(0,0,0,.5)}
+.btn-sm:active{box-shadow:var(--r-i)}
+
+/* ── Output panel ────────────────────────────────────────────────────────── */
+.out-sticky{ display:none; }
+.out-sticky.active{
+  display:block;
+  animation:panelIn .38s ease both;
+}
+@keyframes panelIn{
+  from{opacity:0;transform:translateX(20px)}
+  to  {opacity:1;transform:none}
+}
+
+/* 2-column grid below the status card — mirrors .left-grid on settings page */
+.out-grid{
+  display:grid;
+  grid-template-columns:3fr 2fr;
+  gap:28px;
+  align-items:stretch;
+  margin-top:28px;
+}
+.out-grid>.card{
+  height:100%;display:flex;flex-direction:column;
+}
+/* Log box grows to fill its column */
+.out-grid>.card:first-child .log-box{
+  flex:1;height:auto;min-height:340px;
+}
+/* File list — inset well to match log-box visual pattern */
+.out-grid>.card:last-child .file-list{
+  flex:1;
+  overflow-y:auto;
+  max-height:460px;
+  background:var(--well);
+  border-radius:var(--radius-s);
+  box-shadow:var(--r-i);
+  padding:10px;
+  gap:6px;
+  margin-top:10px;
+  /* Padding gives shadow room so file-item shadows aren't clipped by overflow */
+}
+/* File items sit as raised chips inside the inset well */
+.out-grid>.card:last-child .file-item{
+  background:var(--surface);
+}
+@media(max-width:700px){
+  .out-grid{grid-template-columns:1fr}
+}
+
+/* Back button bar */
+.back-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:16px;
+}
+.btn-back{
+  display:inline-flex;align-items:center;gap:7px;
+  background:var(--surface);border:none;cursor:pointer;
+  color:var(--txt-m);border-radius:10px;
+  font-size:.82rem;font-weight:600;padding:8px 14px;
+  box-shadow:var(--r-s);transition:all .2s;
+}
+.btn-back:hover{color:var(--txt);box-shadow:-4px -4px 10px rgba(255,255,255,.08),5px 5px 14px rgba(0,0,0,.5)}
+.btn-back:active{box-shadow:var(--r-i)}
+.out-title{font-size:.78rem;font-weight:700;color:var(--txt-s);letter-spacing:.08em;text-transform:uppercase}
+
+
+.status-row{display:flex;align-items:center;justify-content:space-between}
+.status-ind{display:flex;align-items:center;gap:10px}
+.dot{
+  width:10px;height:10px;border-radius:50%;flex-shrink:0;
+  background:rgba(255,255,255,.15);
+  box-shadow:var(--r-s);transition:background .3s,box-shadow .3s;
+}
+.dot.running{background:var(--warning);animation:dotPulse 1.4s ease-in-out infinite}
+.dot.done   {background:var(--success);box-shadow:0 0 12px rgba(16,185,129,.6)}
+.dot.error  {background:var(--danger); box-shadow:0 0 12px rgba(239,68,68,.6)}
+@keyframes dotPulse{
+  0%,100%{box-shadow:0 0 4px rgba(245,158,11,.45),0 0 8px rgba(245,158,11,.2)}
+  50%    {box-shadow:0 0 10px rgba(245,158,11,1),0 0 22px rgba(245,158,11,.45)}
+}
+.status-txt{font-weight:700;font-size:.95rem}
+
+/* ── Progress ────────────────────────────────────────────────────────────── */
+.prog-track{
+  height:6px;border-radius:99px;margin:14px 0 6px;
+  box-shadow:var(--r-i);overflow:hidden;
+}
+.prog-fill{
+  height:100%;width:0;border-radius:99px;
+  background:linear-gradient(90deg,#7c3aed,#5b21b6,#7c3aed);
+  background-size:200% 100%;
+  transition:width .38s ease;
+  box-shadow:0 0 10px rgba(124,58,237,.5);
+  animation:shimmer 2.5s linear infinite;
+}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.prog-lbl{font-size:.75rem;color:var(--txt-s);min-height:16px}
+
+/* ── Log ─────────────────────────────────────────────────────────────────── */
+.log-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.log-box{
+  background:var(--well);border-radius:var(--radius-s);
+  padding:14px;height:278px;overflow-y:auto;
+  font-family:'SF Mono','Menlo','Monaco','Courier New',monospace;
+  font-size:.71rem;line-height:1.72;
+  box-shadow:var(--r-i);
+}
+.log-box::-webkit-scrollbar{width:3px}
+.log-box::-webkit-scrollbar-track{background:transparent}
+.log-box::-webkit-scrollbar-thumb{background:rgba(255,255,255,.08);border-radius:4px}
+.ll{color:rgba(255,255,255,.6);white-space:pre-wrap;word-break:break-all;animation:logIn .16s ease}
+.ll.ok  {color:#34d399}
+.ll.err {color:#f87171}
+.ll.warn{color:#fbbf24}
+.ll.hd  {color:#8b5cf6;font-weight:700}
+@keyframes logIn{from{opacity:0;transform:translateX(-3px)}to{opacity:1;transform:none}}
+
+/* ── File list ───────────────────────────────────────────────────────────── */
+.file-list{margin-top:8px;display:flex;flex-direction:column;gap:8px}
+.file-item{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 14px;border-radius:var(--radius-s);
+  background:var(--surface);
+  box-shadow:var(--r-s);
+  transition:all .22s ease;animation:fileIn .3s ease both;
+}
+.file-item:hover{
+  box-shadow:-5px -5px 12px rgba(255,255,255,.055),6px 6px 18px rgba(0,0,0,.72);
+  transform:translateY(-1px);
+}
+.file-item.full{
+  box-shadow:var(--r-s),0 0 0 1px rgba(124,58,237,.25);
+}
+@keyframes fileIn{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:none}}
+.fi-name{font-size:.84rem;font-weight:600}
+.fi-meta{font-size:.73rem;color:var(--txt-s);margin-top:3px}
+
+/* ── Empty state ─────────────────────────────────────────────────────────── */
+.empty{text-align:center;padding:40px 20px;color:var(--txt-s)}
+.empty .ico{font-size:2.2rem;margin-bottom:10px;display:block;opacity:.35}
+.empty p{font-size:.82rem}
+
+/* ── Toast ───────────────────────────────────────────────────────────────── */
+#toast{
+  position:fixed;bottom:24px;right:24px;
+  background:var(--bg);
+  color:var(--txt);padding:11px 18px;border-radius:12px;font-size:.84rem;
+  box-shadow:var(--r);
+  opacity:0;transform:translateY(55px);
+  transition:all .3s cubic-bezier(.34,1.56,.64,1);z-index:999;pointer-events:none;
+}
+#toast.show{opacity:1;transform:translateY(0)}
+
+/* ── Drop burst flash ─────────────────────────────────────────────────────── */
+@keyframes dropBurst{
+  0%  {box-shadow:var(--r-i),0 0 0 0 rgba(167,139,250,.5)}
+  45% {box-shadow:var(--r-i),0 0 0 14px rgba(167,139,250,.0);transform:scale(1.012)}
+  100%{box-shadow:var(--r-i);transform:scale(1)}
+}
+.upload-zone.drop-flash{animation:dropBurst .45s ease-out}
+
+/* ── Format pill pop ──────────────────────────────────────────────────────── */
+@keyframes pillPop{0%{transform:scale(1)}40%{transform:scale(1.1)}100%{transform:scale(1)}}
+.pill:has(input:checked){animation:pillPop .25s ease-out}
+
+/* ── Bitrate row slide-in ─────────────────────────────────────────────────── */
+#bitrate-row{overflow:hidden;max-width:0;opacity:0;pointer-events:none;
+  transition:max-width .32s ease, opacity .25s ease}
+#bitrate-row.visible{max-width:400px;opacity:1;pointer-events:auto}
+
+/* ── Checkbox check-bounce ────────────────────────────────────────────────── */
+@keyframes checkPop{0%{transform:scale(0)}60%{transform:scale(1.3)}100%{transform:scale(1)}}
+.chk input[type=checkbox]:checked::after{animation:checkPop .22s ease-out}
