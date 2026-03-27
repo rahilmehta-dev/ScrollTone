@@ -3,33 +3,50 @@ let jobId    = null;
 let es       = null;
 let _fileIdx = 0;  // for staggered file-item entrance animation
 
+// Batch state (multi-EPUB)
+let batchJobIds = [];
+let batchSources = {};
+let batchState   = {};
+
 // ─── File drag & drop ─────────────────────────────────────────────────────────
 const dz  = document.getElementById('drop-zone');
 const inp = document.getElementById('epub-file');
 
-inp.addEventListener('change', e => e.target.files[0] && showFile(e.target.files[0]));
+inp.addEventListener('change', e => {
+  if (e.target.files.length) showFiles(e.target.files);
+});
 
 dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('drag-over'); });
 dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
 dz.addEventListener('drop', e => {
   e.preventDefault(); dz.classList.remove('drag-over');
-  const f = e.dataTransfer.files[0];
-  if (f && f.name.toLowerCase().endsWith('.epub')) {
-    inp.files = e.dataTransfer.files; showFile(f);
+  const all   = Array.from(e.dataTransfer.files);
+  const epubs = all.filter(f => f.name.toLowerCase().endsWith('.epub'));
+  if (epubs.length) {
+    inp.files = e.dataTransfer.files;
+    showFiles(e.dataTransfer.files);
     dz.classList.add('drop-flash');
     dz.addEventListener('animationend', () => dz.classList.remove('drop-flash'), {once:true});
   } else {
-    toast('Please drop an .epub file');
+    toast('Please drop .epub files only');
   }
 });
 
-function showFile(f) {
+function showFiles(fileList) {
   dz.classList.add('has-file');
   const n = document.getElementById('up-name');
-  n.textContent = f.name + '  (' + fmtBytes(f.size) + ')';
+  if (fileList.length === 1) {
+    const f = fileList[0];
+    n.textContent = f.name + '  (' + fmtBytes(f.size) + ')';
+    dz.querySelector('.up-title').textContent = 'EPUB loaded';
+    dz.querySelector('.up-sub').textContent   = 'Click to replace';
+  } else {
+    const total = Array.from(fileList).reduce((s, f) => s + f.size, 0);
+    n.textContent = fileList.length + ' books selected  (' + fmtBytes(total) + ')';
+    dz.querySelector('.up-title').textContent = fileList.length + ' EPUBs loaded';
+    dz.querySelector('.up-sub').textContent   = 'Click to change selection';
+  }
   n.style.display = 'block';
-  dz.querySelector('.up-title').textContent = 'EPUB loaded';
-  dz.querySelector('.up-sub').textContent   = 'Click to replace';
 }
 
 function fmtBytes(b) {
@@ -83,6 +100,10 @@ function backToSettings() {
   const out  = document.querySelector('.out-sticky');
   const main = document.querySelector('main');
 
+  // Close all batch SSE connections
+  Object.values(batchSources).forEach(s => s.close());
+  batchSources = {};
+
   // Hide output, shrink main, restore settings
   out.classList.remove('active');
   main.classList.remove('has-job');
@@ -125,11 +146,12 @@ function onFormatChange() {
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 async function startJob() {
-  const file = inp.files[0];
-  if (!file) { toast('Please select an EPUB file first'); return; }
+  if (!inp.files || inp.files.length === 0) {
+    toast('Please select at least one EPUB file'); return;
+  }
 
   const fd = new FormData();
-  fd.append('file',          file);
+  for (const f of inp.files) { fd.append('files', f); }
   fd.append('voice',         document.getElementById('voice').value);
   fd.append('lang_code',     document.getElementById('lang').value);
   fd.append('speed',         document.getElementById('speed').value);
@@ -155,8 +177,19 @@ async function startJob() {
     const r = await fetch('/convert', { method: 'POST', body: fd });
     if (!r.ok) throw new Error('Server error ' + r.status);
     const d = await r.json();
-    jobId = d.job_id;
-    connectSSE(jobId);
+
+    batchJobIds = d.job_ids;
+
+    if (batchJobIds.length === 1) {
+      // Single-book path — use existing log+files UI unchanged
+      jobId = batchJobIds[0];
+      setStatus('Starting…');
+      connectSSE(jobId);
+    } else {
+      // Multi-book batch path
+      initBatchUI(d);
+      connectBatchSSE(batchJobIds);
+    }
   } catch (e) {
     setDot('error'); setStatus('Error');
     addLog('Error: ' + e.message, 'err');
@@ -164,7 +197,7 @@ async function startJob() {
   }
 }
 
-// ─── SSE ──────────────────────────────────────────────────────────────────────
+// ─── SSE (single-book) ────────────────────────────────────────────────────────
 function connectSSE(id) {
   if (es) es.close();
   es = new EventSource('/stream/' + id);
@@ -188,10 +221,209 @@ function onDone(files) {
   if (files && files.length) toast('✓ ' + files.length + ' file(s) ready');
 }
 
+// ─── SSE (batch, multi-book) ──────────────────────────────────────────────────
+function connectBatchSSE(jobIds) {
+  batchState   = {};
+  batchSources = {};
+
+  jobIds.forEach((id, i) => {
+    batchState[id] = {
+      status: 'running',
+      title:  batchJobIds[i] ? (window._batchTitles && window._batchTitles[i]) || ('Book ' + (i+1)) : ('Book ' + (i+1)),
+      lastLog: 'Starting…',
+      files:   [],
+      totalDur: 0,
+    };
+    const src = new EventSource('/stream/' + id);
+    src.onmessage = e => { try { handleBatchMsg(id, JSON.parse(e.data)); } catch(_) {} };
+    src.onerror   = () => {
+      src.close();
+      batchState[id].status = 'error';
+      updateBookCard(id);
+      checkBatchComplete();
+    };
+    batchSources[id] = src;
+  });
+}
+
+function handleBatchMsg(id, m) {
+  const s = batchState[id];
+  if (!s) return;
+
+  if (m.type === 'log') {
+    s.lastLog = m.msg.trim();
+    updateBookCard(id);
+  } else if (m.type === 'status') {
+    s.lastLog = m.msg;
+    updateBookCard(id);
+  } else if (m.type === 'progress') {
+    s.progress = m.value;
+    updateBookCard(id);
+  } else if (m.type === 'file') {
+    s.files.push(m);
+    s.totalDur += (m.duration || 0);
+    updateBookCard(id);
+  } else if (m.type === 'done') {
+    if (batchSources[id]) { batchSources[id].close(); delete batchSources[id]; }
+    s.status    = 'done';
+    s.doneFiles = m.files || [];
+    updateBookCard(id);
+    checkBatchComplete();
+  }
+}
+
+function checkBatchComplete() {
+  const allDone = batchJobIds.every(id =>
+    batchState[id] && (batchState[id].status === 'done' || batchState[id].status === 'error')
+  );
+  if (allDone) {
+    const doneCount  = batchJobIds.filter(id => batchState[id] && batchState[id].status === 'done').length;
+    const errorCount = batchJobIds.filter(id => batchState[id] && batchState[id].status === 'error').length;
+    setDot('done');
+    setStatus('Complete — ' + doneCount + ' book(s) converted' +
+              (errorCount ? ', ' + errorCount + ' error(s)' : ''));
+    setProg(1, '');
+    resetBtns();
+    toast('✓ ' + doneCount + ' book(s) converted successfully');
+  } else {
+    const pending = batchJobIds.filter(id => batchState[id] && batchState[id].status === 'running').length;
+    setStatus('Converting ' + pending + ' of ' + batchJobIds.length + ' books…');
+  }
+}
+
+// ─── Batch UI ─────────────────────────────────────────────────────────────────
+function initBatchUI(d) {
+  // Seed titles immediately from server response
+  window._batchTitles = d.titles || [];
+  d.job_ids.forEach((id, i) => {
+    if (batchState[id]) batchState[id].title = d.titles[i] || ('Book ' + (i+1));
+  });
+
+  // Replace the out-grid with a batch-grid of book cards
+  const outGrid = document.querySelector('.out-grid');
+  outGrid.className = 'batch-grid';
+  outGrid.innerHTML = '';
+
+  d.job_ids.forEach((id, i) => {
+    const title = (d.titles && d.titles[i]) ? d.titles[i] : ('Book ' + (i+1));
+    // Seed state immediately so updateBookCard works
+    if (!batchState[id]) {
+      batchState[id] = { status:'running', title, lastLog:'Starting…', files:[], totalDur:0 };
+    } else {
+      batchState[id].title = title;
+    }
+    const card = document.createElement('div');
+    card.className = 'book-card';
+    card.id = 'book-card-' + id;
+    card.innerHTML = bookCardHTML(id, title);
+    outGrid.appendChild(card);
+  });
+
+  setStatus('Converting ' + d.job_ids.length + ' books…');
+}
+
+function bookCardHTML(id, title) {
+  return (
+    '<div class="bc-header">' +
+      '<span class="bc-title" id="bc-title-' + id + '">' + esc(title) + '</span>' +
+      '<span class="bc-status-icon" id="bc-icon-' + id + '"><span class="spinner"></span></span>' +
+    '</div>' +
+    '<div class="bc-log" id="bc-log-' + id + '">Starting…</div>' +
+    '<div class="bc-progress" id="bc-prog-' + id + '" style="display:none">' +
+      '<div class="bc-prog-fill" id="bc-prog-fill-' + id + '"></div>' +
+    '</div>' +
+    '<div class="bc-actions" id="bc-actions-' + id + '" style="display:none"></div>'
+  );
+}
+
+function updateBookCard(id) {
+  const s    = batchState[id];
+  const card = document.getElementById('book-card-' + id);
+  if (!card || !s) return;
+
+  // Title
+  const titleEl = document.getElementById('bc-title-' + id);
+  if (titleEl && s.title) titleEl.textContent = s.title;
+
+  // Status icon
+  const iconEl = document.getElementById('bc-icon-' + id);
+  if (iconEl) {
+    if (s.status === 'done') {
+      iconEl.innerHTML = '<span class="bc-checkmark">✓</span>';
+      card.classList.add('bc-done');
+    } else if (s.status === 'error') {
+      iconEl.innerHTML = '<span class="bc-errmark">✗</span>';
+      card.classList.add('bc-error');
+    } else {
+      iconEl.innerHTML = '<span class="spinner"></span>';
+    }
+  }
+
+  // Log / status line
+  const logEl = document.getElementById('bc-log-' + id);
+  if (logEl) {
+    if (s.status === 'done') {
+      const totalMins = Math.floor(s.totalDur / 60);
+      const totalSecs = Math.round(s.totalDur % 60);
+      const durTxt = totalMins > 0
+        ? totalMins + 'h ' + totalSecs + 'm'
+        : totalSecs + 's';
+      logEl.textContent = (s.doneFiles ? s.doneFiles.length : s.files.length) + ' file(s)  ·  ' + durTxt;
+    } else {
+      const txt = s.lastLog || 'Processing…';
+      logEl.textContent = txt.length > 85 ? txt.slice(0, 82) + '…' : txt;
+    }
+  }
+
+  // Mini progress bar
+  if (typeof s.progress === 'number') {
+    const progEl = document.getElementById('bc-prog-' + id);
+    if (progEl) {
+      progEl.style.display = 'block';
+      const fill = document.getElementById('bc-prog-fill-' + id);
+      if (fill) fill.style.width = Math.round(s.progress * 100) + '%';
+    }
+  }
+
+  // "Download All" button — appears once done
+  if (s.status === 'done') {
+    const actEl = document.getElementById('bc-actions-' + id);
+    if (actEl && actEl.children.length === 0) {
+      const files = s.doneFiles && s.doneFiles.length ? s.doneFiles : s.files.map(f => f.filename);
+      if (files.length > 0) {
+        const btn = document.createElement('button');
+        btn.className   = 'btn-sm bc-dl-btn';
+        btn.textContent = '↓ Download All (' + files.length + ')';
+        btn.onclick     = () => downloadAll(id, files);
+        actEl.appendChild(btn);
+        actEl.style.display = 'flex';
+      }
+    }
+  }
+}
+
+function downloadAll(jobId, filenames) {
+  filenames.forEach((fname, i) => {
+    setTimeout(() => {
+      const a = document.createElement('a');
+      a.href     = '/download/' + jobId + '/' + encodeURIComponent(fname);
+      a.download = fname;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }, i * 300);
+  });
+}
+
 // ─── Stop ─────────────────────────────────────────────────────────────────────
 function stopJob() {
-  if (!jobId) return;
-  fetch('/stop/' + jobId, { method: 'POST' });
+  if (batchJobIds.length > 1) {
+    batchJobIds.forEach(id => fetch('/stop/' + id, { method: 'POST' }));
+    Object.values(batchSources).forEach(s => s.close());
+    batchSources = {};
+  } else if (jobId) {
+    fetch('/stop/' + jobId, { method: 'POST' });
+  }
   setStatus('Stopping…');
   document.getElementById('stop-btn').disabled = true;
 }
@@ -206,6 +438,7 @@ function setProg(v, lbl) {
 
 function addLog(raw, cls) {
   const box = document.getElementById('log');
+  if (!box) return;
   raw.split('\n').forEach(line => {
     if (!line.trim()) return;
     const d = document.createElement('div');
@@ -223,6 +456,7 @@ function addLog(raw, cls) {
 
 function addFile(f) {
   const list  = document.getElementById('file-list');
+  if (!list) return;
   const empty = list.querySelector('.empty');
   if (empty) empty.remove();
 
@@ -245,11 +479,33 @@ function addFile(f) {
 }
 
 function resetOutput() {
-  _fileIdx = 0;
-  document.getElementById('log').innerHTML = '';
-  document.getElementById('file-list').innerHTML =
-    '<div class="empty">' +
-    '<p>Files appear here as each chapter is processed.</p></div>';
+  // Close any open batch connections
+  Object.values(batchSources).forEach(s => s.close());
+  batchSources = {};
+  batchState   = {};
+  batchJobIds  = [];
+  _fileIdx     = 0;
+  window._batchTitles = [];
+
+  // Restore the single-book out-grid structure
+  const container = document.querySelector('.batch-grid, .out-grid');
+  if (container) {
+    container.className = 'out-grid';
+    container.innerHTML =
+      '<div class="card">' +
+        '<div class="log-hdr">' +
+          '<div class="sect" style="margin:0">Live Log</div>' +
+          '<button class="btn-sm" onclick="clearLog()">Clear</button>' +
+        '</div>' +
+        '<div class="log-box" id="log"></div>' +
+      '</div>' +
+      '<div class="card">' +
+        '<div class="sect">Output Files</div>' +
+        '<div class="file-list" id="file-list">' +
+          '<div class="empty"><p>Files appear here as each chapter is processed.</p></div>' +
+        '</div>' +
+      '</div>';
+  }
   setProg(0, '');
 }
 
@@ -260,7 +516,10 @@ function resetBtns() {
   s.style.display = 'none'; s.disabled = false;
 }
 
-function clearLog() { document.getElementById('log').innerHTML = ''; }
+function clearLog() {
+  const box = document.getElementById('log');
+  if (box) box.innerHTML = '';
+}
 
 function esc(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');

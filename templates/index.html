@@ -34,7 +34,7 @@
 
         <!-- EPUB upload -->
         <div class="field">
-          <label>Book (EPUB) <i class="tip" data-tip="Drop any .epub file here. The book's chapters are extracted automatically and converted one by one.">ⓘ</i></label>
+          <label>Books (EPUB) <i class="tip" data-tip="Drop one or more .epub files. Each book is converted separately and saved into its own subfolder.">ⓘ</i></label>
           <div class="upload-zone" id="drop-zone"
                onclick="document.getElementById('epub-file').click()">
             <span class="up-icon">
@@ -43,11 +43,11 @@
                 <line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
               </svg>
             </span>
-            <div class="up-title">Drop EPUB here or click to browse</div>
-            <div class="up-sub">.epub files only</div>
+            <div class="up-title">Drop EPUBs here or click to browse</div>
+            <div class="up-sub">.epub files · select multiple to batch convert</div>
             <div class="up-name" id="up-name" style="display:none"></div>
           </div>
-          <input type="file" id="epub-file" accept=".epub" style="display:none">
+          <input type="file" id="epub-file" accept=".epub" multiple style="display:none">
         </div>
 
         <div class="div"></div>
