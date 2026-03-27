@@ -88,7 +88,57 @@ docker compose down && docker compose up
 
 ---
 
-## Running Without Docker
+## Running Locally (macOS Apple Silicon — M1/M2/M3)
+
+**Step 1 — System dependencies**
+
+```bash
+brew install ffmpeg libsndfile
+```
+
+**Step 2 — Create a fresh conda environment**
+
+```bash
+conda create -n scrolltone python=3.11 -y
+conda activate scrolltone
+```
+
+**Step 3 — Install PyTorch (M1 native with Metal/MPS support)**
+
+```bash
+pip install torch torchaudio
+```
+
+> Do **not** use `--index-url https://download.pytorch.org/whl/cpu` — that is the Linux CPU-only build. The standard pip package includes M1 Metal acceleration automatically.
+
+**Step 4 — Install app dependencies**
+
+```bash
+pip install -r requirements.txt
+python -m spacy download en_core_web_sm
+```
+
+**Step 5 — Run**
+
+```bash
+python app.py
+```
+
+Open **http://localhost:7860**
+
+### M1 Notes
+
+| Topic | Detail |
+|-------|--------|
+| First conversion | Kokoro downloads ~330 MB of weights to `~/.cache/huggingface` — one time only |
+| Device setting | Leave on **Auto** — Kokoro uses Metal (MPS) automatically on Apple Silicon |
+| Workers | 1 worker is plenty on M1 Max; MPS handles inference fast |
+| Voice previews | First click per voice takes ~5–10 s to generate, then instant |
+| MP3 output | Uses the ffmpeg installed in Step 1 — works natively |
+
+---
+
+## Running Without Docker (Linux / generic)
 
 ```bash
 pip install -r requirements.txt
