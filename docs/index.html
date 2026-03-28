@@ -172,19 +172,6 @@ nav{padding:24px 0}
   transform-origin:16px 18px;
 }
 
-/* Reopen hint that appears after close */
-.reopen-hint{
-  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-  font-size:.72rem;color:var(--txt-s);pointer-events:none;
-  opacity:0;transition:opacity .4s ease .3s;text-align:center;
-  white-space:nowrap;
-}
-.reopen-hint.visible{opacity:1}
-.reopen-hint span{
-  display:block;font-size:1.2rem;margin-bottom:4px;
-  animation:hintBob 2s ease-in-out infinite;
-}
-@keyframes hintBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
 .screen-bar .url-chip{
   margin-left:12px;font-size:.68rem;font-family:monospace;
   color:var(--txt-m);background:rgba(255,255,255,.05);
@@ -522,9 +509,6 @@ body::before{
         </div>
       </div>
     </div><!-- /screen-card -->
-      <div class="reopen-hint" id="reopen-hint">
-        <span>🖥️</span>Click anywhere to reopen
-      </div>
     </div><!-- /wrapper -->
   </div>
 </section>
@@ -636,8 +620,6 @@ function cpBlock(id, btn) {
 // ── Mockup window close / open ────────────────────────────────────────────────
 const mockup     = document.getElementById('mockup');
 const redDot     = document.getElementById('red-dot');
-const hint       = document.getElementById('reopen-hint');
-const bar        = document.getElementById('mockup-bar');
 let   isOpen     = true;
 let   animLocked = false;
 
@@ -653,29 +635,22 @@ redDot.addEventListener('click', () => {
   mockup.classList.add('closing');
   mockup.addEventListener('animationend', () => {
     mockup.classList.remove('closing');
-    mockup.style.opacity    = '0';
+    mockup.style.opacity       = '0';
     mockup.style.pointerEvents = 'none';
     isOpen     = false;
-    animLocked = false;
-    hint.classList.add('visible');
-  }, { once: true });
-});
 
-// Click anywhere (outside red dot) in the wrapper to reopen
-hint.parentElement.addEventListener('click', (e) => {
-  if (isOpen || animLocked || e.target === redDot || redDot.contains(e.target)) return;
-  if (!isOpen) {
-    animLocked = true;
-    hint.classList.remove('visible');
-    mockup.style.opacity       = '';
-    mockup.style.pointerEvents = '';
-    mockup.classList.add('opening');
-    mockup.addEventListener('animationend', () => {
-      mockup.classList.remove('opening');
-      isOpen     = true;
-      animLocked = false;
-    }, { once: true });
-  }
+    // Auto-reopen after a short pause
+    setTimeout(() => {
+      mockup.style.opacity       = '';
+      mockup.style.pointerEvents = '';
+      mockup.classList.add('opening');
+      mockup.addEventListener('animationend', () => {
+        mockup.classList.remove('opening');
+        isOpen     = true;
+        animLocked = false;
+      }, { once: true });
+    }, 900);
+  }, { once: true });
 });
 
 // ── Scroll-triggered reveal ───────────────────────────────────────────────────
