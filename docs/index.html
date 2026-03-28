@@ -207,39 +207,6 @@ section{padding:80px 0}
 .feat h3{font-size:.88rem;font-weight:700;margin-bottom:6px}
 .feat p{font-size:.78rem;color:var(--txt-m);line-height:1.6}
 
-/* ── Steps ────────────────────────────────────────────────────────────────── */
-.steps-row{
-  display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:48px;
-}
-.step{
-  border-radius:var(--r16);box-shadow:var(--r-i);
-  background:var(--well);padding:24px 20px;text-align:center;
-}
-.step-n{
-  width:36px;height:36px;border-radius:50%;
-  box-shadow:var(--r-s);
-  margin:0 auto 14px;display:flex;align-items:center;justify-content:center;
-  font-size:.78rem;font-weight:800;color:#a78bfa;
-}
-.step h3{font-size:.82rem;font-weight:700;margin-bottom:6px}
-.step p{font-size:.74rem;color:var(--txt-m)}
-
-/* ── Voices ───────────────────────────────────────────────────────────────── */
-.voices-section{text-align:center}
-.voice-grid{
-  display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:36px;
-}
-.vc{
-  padding:7px 14px;border-radius:99px;
-  box-shadow:var(--r-s);
-  font-size:.75rem;font-weight:500;color:var(--txt-m);
-  display:flex;align-items:center;gap:6px;
-}
-.vc-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-.vc-count{
-  margin-top:24px;font-size:.78rem;color:var(--txt-s);
-}
-
 /* ── Install ──────────────────────────────────────────────────────────────── */
 .install-box{
   border-radius:var(--r16);box-shadow:var(--r-i);
@@ -298,13 +265,11 @@ footer{
 /* ── Responsive ───────────────────────────────────────────────────────────── */
 @media(max-width:780px){
   .feat-grid{grid-template-columns:1fr 1fr}
-  .steps-row{grid-template-columns:1fr 1fr}
   .screen-body{grid-template-columns:1fr}
   .sc-left{display:none}
 }
 @media(max-width:520px){
   .feat-grid{grid-template-columns:1fr}
-  .steps-row{grid-template-columns:1fr 1fr}
 }
 </style>
 </head>
@@ -439,72 +404,6 @@ footer{
   </div>
 </section>
 
-<!-- How it works -->
-<section>
-  <div class="wrap">
-    <div class="s-label">How it works</div>
-    <div class="s-title">Four steps.</div>
-    <div class="steps-row">
-      <div class="step">
-        <div class="step-n">1</div>
-        <h3>Upload EPUB</h3>
-        <p>Drag one or more .epub files into the browser.</p>
-      </div>
-      <div class="step">
-        <div class="step-n">2</div>
-        <h3>Pick a Voice</h3>
-        <p>Choose from 20 voices. Preview before you commit.</p>
-      </div>
-      <div class="step">
-        <div class="step-n">3</div>
-        <h3>Start</h3>
-        <p>Hit convert. Chapters stream in as they finish.</p>
-      </div>
-      <div class="step">
-        <div class="step-n">4</div>
-        <h3>Download</h3>
-        <p>Save individual chapters or download all at once.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Voices -->
-<section>
-  <div class="wrap voices-section">
-    <div class="s-label">Voices</div>
-    <div class="s-title">20 voices included.</div>
-    <div class="voice-grid">
-      <div class="vc"><span class="vc-dot" style="background:#a78bfa"></span>af_heart</div>
-      <div class="vc"><span class="vc-dot" style="background:#a78bfa"></span>af_bella</div>
-      <div class="vc"><span class="vc-dot" style="background:#a78bfa"></span>af_nicole</div>
-      <div class="vc"><span class="vc-dot" style="background:#a78bfa"></span>af_sarah</div>
-      <div class="vc"><span class="vc-dot" style="background:#a78bfa"></span>af_sky</div>
-      <div class="vc"><span class="vc-dot" style="background:#67e8f9"></span>am_adam</div>
-      <div class="vc"><span class="vc-dot" style="background:#67e8f9"></span>am_echo</div>
-      <div class="vc"><span class="vc-dot" style="background:#67e8f9"></span>am_eric</div>
-      <div class="vc"><span class="vc-dot" style="background:#67e8f9"></span>am_fenrir</div>
-      <div class="vc"><span class="vc-dot" style="background:#67e8f9"></span>am_liam</div>
-      <div class="vc"><span class="vc-dot" style="background:#67e8f9"></span>am_michael</div>
-      <div class="vc"><span class="vc-dot" style="background:#67e8f9"></span>am_onyx</div>
-      <div class="vc"><span class="vc-dot" style="background:#f9a8d4"></span>bf_alice</div>
-      <div class="vc"><span class="vc-dot" style="background:#f9a8d4"></span>bf_emma</div>
-      <div class="vc"><span class="vc-dot" style="background:#f9a8d4"></span>bf_isabella</div>
-      <div class="vc"><span class="vc-dot" style="background:#f9a8d4"></span>bf_lily</div>
-      <div class="vc"><span class="vc-dot" style="background:#86efac"></span>bm_daniel</div>
-      <div class="vc"><span class="vc-dot" style="background:#86efac"></span>bm_fable</div>
-      <div class="vc"><span class="vc-dot" style="background:#86efac"></span>bm_george</div>
-      <div class="vc"><span class="vc-dot" style="background:#86efac"></span>bm_lewis</div>
-    </div>
-    <div class="vc-count">
-      <span style="background:rgba(167,139,250,.15);padding:2px 8px;border-radius:4px;color:#a78bfa;font-size:.65rem;font-weight:700">AF</span> American Female &nbsp;
-      <span style="background:rgba(103,232,249,.12);padding:2px 8px;border-radius:4px;color:#67e8f9;font-size:.65rem;font-weight:700">AM</span> American Male &nbsp;
-      <span style="background:rgba(249,168,212,.12);padding:2px 8px;border-radius:4px;color:#f9a8d4;font-size:.65rem;font-weight:700">BF</span> British Female &nbsp;
-      <span style="background:rgba(134,239,172,.12);padding:2px 8px;border-radius:4px;color:#86efac;font-size:.65rem;font-weight:700">BM</span> British Male
-    </div>
-  </div>
-</section>
-
 <!-- Install -->
 <section id="install">
   <div class="wrap">
@@ -579,7 +478,7 @@ const io = new IntersectionObserver(entries => {
   });
 }, { threshold: 0.08 });
 
-document.querySelectorAll('.feat, .step, .vc').forEach((el, i) => {
+document.querySelectorAll('.feat').forEach((el, i) => {
   el.style.opacity   = '0';
   el.style.transform = 'translateY(16px)';
   el.style.transition= `opacity .45s ease ${(i % 6) * 0.06}s, transform .45s ease ${(i % 6) * 0.06}s`;
