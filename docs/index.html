@@ -254,13 +254,106 @@ footer{
 .foot-copy a:hover{color:var(--txt)}
 
 /* ── Animations ───────────────────────────────────────────────────────────── */
+
+/* Page-load: shared fade-up */
 @keyframes up{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}
-.hero>*{animation:up .55s ease both}
-.hero>*:nth-child(1){animation-delay:.05s}
-.hero>*:nth-child(2){animation-delay:.12s}
-.hero>*:nth-child(3){animation-delay:.19s}
-.hero>*:nth-child(4){animation-delay:.26s}
-.hero>*:nth-child(5){animation-delay:.33s}
+
+/* Nav slides down */
+@keyframes navIn{from{opacity:0;transform:translateY(-14px)}to{opacity:1;transform:translateY(0)}}
+nav{animation:navIn .4s cubic-bezier(.22,1,.36,1) both}
+
+/* Hero children stagger up */
+.hero>*{animation:up .6s cubic-bezier(.22,1,.36,1) both}
+.hero>*:nth-child(1){animation-delay:.08s}
+.hero>*:nth-child(2){animation-delay:.16s}
+.hero>*:nth-child(3){animation-delay:.24s}
+.hero>*:nth-child(4){animation-delay:.32s}
+.hero>*:nth-child(5){animation-delay:.40s}
+
+/* Ambient glow orb behind hero */
+body::before{
+  content:'';position:fixed;top:-180px;left:50%;
+  width:720px;height:720px;border-radius:50%;
+  background:radial-gradient(circle,rgba(124,58,237,.09) 0%,transparent 66%);
+  pointer-events:none;z-index:0;transform:translateX(-50%);
+  animation:orbDrift 14s ease-in-out infinite alternate;
+}
+@keyframes orbDrift{
+  0% {transform:translateX(-58%) translateY(0px)}
+  100%{transform:translateX(-42%) translateY(48px)}
+}
+.wrap,.nav-inner,.foot-inner{position:relative;z-index:1}
+
+/* Gradient text shimmer */
+.hero h1 em{
+  background:linear-gradient(135deg,#a78bfa 0%,#7c3aed 40%,#5eead4 70%,#a78bfa 100%);
+  background-size:250% auto;
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  animation:gradShift 5s linear infinite;
+}
+@keyframes gradShift{to{background-position:250% center}}
+
+/* Command cursor blink */
+.cmd-row .cmd::after{
+  content:'▋';margin-left:2px;font-size:.7rem;
+  color:var(--green);opacity:.8;
+  animation:blink 1.1s step-end infinite;
+}
+@keyframes blink{0%,100%{opacity:.8}50%{opacity:0}}
+
+/* Mockup card gentle float */
+@keyframes float{
+  0%,100%{transform:translateY(0px)}
+  50%    {transform:translateY(-7px)}
+}
+.screen-card{animation:float 7s ease-in-out infinite}
+
+/* Status dot pulse ring */
+@keyframes dotPulse{
+  0%  {box-shadow:0 0 0 0 rgba(16,185,129,.55),0 0 6px var(--green)}
+  65% {box-shadow:0 0 0 8px rgba(16,185,129,0), 0 0 6px var(--green)}
+  100%{box-shadow:0 0 0 0 rgba(16,185,129,0), 0 0 6px var(--green)}
+}
+.sc-dot{animation:dotPulse 2.2s ease-out infinite}
+
+/* Mockup log lines appear one by one */
+@keyframes logIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+.sc-log .ll:nth-child(1){animation:logIn .35s ease both .7s}
+.sc-log .ll:nth-child(2){animation:logIn .35s ease both 1.1s}
+.sc-log .ll:nth-child(3){animation:logIn .35s ease both 1.5s}
+.sc-log .ll:nth-child(4){animation:logIn .35s ease both 1.9s}
+.sc-log .ll:nth-child(5){animation:logIn .35s ease both 2.3s}
+
+/* Mockup file items slide in from right */
+@keyframes fileIn{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:translateX(0)}}
+.sc-files .fi:nth-child(1){animation:fileIn .35s ease both 1.3s}
+.sc-files .fi:nth-child(2){animation:fileIn .35s ease both 1.7s}
+.sc-files .fi:nth-child(3){animation:fileIn .35s ease both 2.1s}
+
+/* Feature card hover lift + icon bounce */
+.feat{transition:transform .25s ease,box-shadow .25s ease}
+.feat:hover{
+  transform:translateY(-5px);
+  box-shadow:var(--r),0 0 0 1px rgba(124,58,237,.18);
+}
+.feat-icon{display:inline-block;transition:transform .2s ease}
+.feat:hover .feat-icon{animation:iconBounce .4s ease}
+@keyframes iconBounce{0%,100%{transform:translateY(0)}40%{transform:translateY(-7px)}70%{transform:translateY(-2px)}}
+
+/* Install lang badge shimmer */
+@keyframes shimmer{0%{background-position:200% center}100%{background-position:-200% center}}
+.ib-head .lang{
+  background:linear-gradient(90deg,rgba(124,58,237,.15),rgba(167,139,250,.4),rgba(124,58,237,.15));
+  background-size:200% auto;
+  animation:shimmer 3.5s linear infinite;
+}
+
+/* GitHub button hover glow */
+.gh-btn{transition:color .2s,box-shadow .25s}
+.gh-btn:hover{
+  color:var(--txt);
+  box-shadow:var(--r-s),0 0 0 1px rgba(124,58,237,.25);
+}
 
 /* ── Responsive ───────────────────────────────────────────────────────────── */
 @media(max-width:780px){
@@ -467,21 +560,38 @@ function cpBlock(id, btn) {
   });
 }
 
-// scroll fade-in
+// Scroll-triggered reveal
 const io = new IntersectionObserver(entries => {
   entries.forEach(e => {
     if (e.isIntersecting) {
-      e.target.style.opacity = '1';
+      e.target.style.opacity   = '1';
       e.target.style.transform = 'translateY(0)';
       io.unobserve(e.target);
     }
   });
 }, { threshold: 0.08 });
 
+// Feature cards — staggered
 document.querySelectorAll('.feat').forEach((el, i) => {
-  el.style.opacity   = '0';
-  el.style.transform = 'translateY(16px)';
-  el.style.transition= `opacity .45s ease ${(i % 6) * 0.06}s, transform .45s ease ${(i % 6) * 0.06}s`;
+  el.style.opacity    = '0';
+  el.style.transform  = 'translateY(20px)';
+  el.style.transition = `opacity .5s ease ${i * 0.07}s, transform .5s ease ${i * 0.07}s`;
+  io.observe(el);
+});
+
+// Section labels + titles — fade up
+document.querySelectorAll('section:not(.hero) .s-label, section:not(.hero) .s-title').forEach((el, i) => {
+  el.style.opacity    = '0';
+  el.style.transform  = 'translateY(14px)';
+  el.style.transition = `opacity .5s ease ${i * 0.06}s, transform .5s ease ${i * 0.06}s`;
+  io.observe(el);
+});
+
+// Install box — fade up
+document.querySelectorAll('.install-box').forEach(el => {
+  el.style.opacity    = '0';
+  el.style.transform  = 'translateY(20px)';
+  el.style.transition = 'opacity .55s ease .1s, transform .55s ease .1s';
   io.observe(el);
 });
 </script>
