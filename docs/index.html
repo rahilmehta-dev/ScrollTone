@@ -108,13 +108,83 @@ nav{padding:24px 0}
   border-radius:18px;box-shadow:var(--r);
   background:var(--bg);overflow:hidden;
   max-width:820px;margin:0 auto;
+  /* float animation removed */
 }
 .screen-bar{
   height:36px;background:var(--well);
   border-bottom:1px solid rgba(255,255,255,.05);
   display:flex;align-items:center;padding:0 14px;gap:7px;
 }
-.dot{width:11px;height:11px;border-radius:50%}
+.dot{width:11px;height:11px;border-radius:50%;position:relative;flex-shrink:0}
+
+/* Red dot — clickable, shows × on hover */
+.dot-red{
+  cursor:pointer;transition:transform .15s ease, filter .15s ease;
+  display:flex;align-items:center;justify-content:center;
+}
+.dot-red:hover{transform:scale(1.25);filter:brightness(1.2)}
+.dot-red .x-icon{
+  position:absolute;font-size:7px;font-weight:900;line-height:1;
+  color:rgba(80,0,0,.75);opacity:0;transition:opacity .15s;
+  user-select:none;pointer-events:none;
+}
+.screen-bar:hover .dot-red .x-icon{opacity:1}
+
+/* Dot ripple on click */
+.dot-red::after{
+  content:'';position:absolute;inset:-3px;border-radius:50%;
+  background:rgba(255,95,87,.0);transition:none;
+}
+.dot-red.rippling::after{
+  animation:dotRipple .45s ease-out forwards;
+}
+@keyframes dotRipple{
+  0% {transform:scale(1);background:rgba(255,95,87,.5)}
+  100%{transform:scale(3.5);background:rgba(255,95,87,0)}
+}
+
+/* Window close */
+@keyframes winClose{
+  0%  {transform:scale(1)    rotate(0deg)   translateY(0);   opacity:1;filter:brightness(1)}
+  8%  {transform:scale(1.03) rotate(-.5deg) translateY(-3px);opacity:1;filter:brightness(1.15)}
+  16% {transform:scale(.98)  rotate(.4deg)  translateY(1px); opacity:1}
+  24% {transform:scale(1.01) rotate(-.2deg) translateY(-1px);opacity:1}
+  32% {transform:scale(1)    rotate(0deg)   translateY(0);   opacity:1}
+  65% {transform:scale(.4)   rotate(-1deg)  translateY(-10px);opacity:.6;filter:brightness(1.5)}
+  100%{transform:scale(0.03) rotate(-2deg)  translateY(-20px);opacity:0;filter:brightness(2)}
+}
+.screen-card.closing{
+  animation:winClose .6s cubic-bezier(.4,0,1,1) forwards;
+  transform-origin:16px 18px;
+  pointer-events:none;
+}
+
+/* Window open */
+@keyframes winOpen{
+  0%  {transform:scale(0.03) rotate(-2deg);opacity:0;filter:brightness(2)}
+  35% {transform:scale(1.04) rotate(.3deg); opacity:1;filter:brightness(1.1)}
+  55% {transform:scale(.98)  rotate(-.15deg);opacity:1}
+  72% {transform:scale(1.01) rotate(.08deg); opacity:1}
+  100%{transform:scale(1)    rotate(0deg);   opacity:1;filter:brightness(1)}
+}
+.screen-card.opening{
+  animation:winOpen .55s cubic-bezier(.22,1,.36,1) forwards;
+  transform-origin:16px 18px;
+}
+
+/* Reopen hint that appears after close */
+.reopen-hint{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  font-size:.72rem;color:var(--txt-s);pointer-events:none;
+  opacity:0;transition:opacity .4s ease .3s;text-align:center;
+  white-space:nowrap;
+}
+.reopen-hint.visible{opacity:1}
+.reopen-hint span{
+  display:block;font-size:1.2rem;margin-bottom:4px;
+  animation:hintBob 2s ease-in-out infinite;
+}
+@keyframes hintBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
 .screen-bar .url-chip{
   margin-left:12px;font-size:.68rem;font-family:monospace;
   color:var(--txt-m);background:rgba(255,255,255,.05);
@@ -301,12 +371,7 @@ body::before{
 }
 @keyframes blink{0%,100%{opacity:.8}50%{opacity:0}}
 
-/* Mockup card gentle float */
-@keyframes float{
-  0%,100%{transform:translateY(0px)}
-  50%    {transform:translateY(-7px)}
-}
-.screen-card{animation:float 7s ease-in-out infinite}
+/* float animation removed per user request */
 
 /* Status dot pulse ring */
 @keyframes dotPulse{
@@ -403,9 +468,12 @@ body::before{
     </div>
 
     <!-- App mockup -->
-    <div class="screen-card">
-      <div class="screen-bar">
-        <div class="dot" style="background:#ff5f57"></div>
+    <div style="position:relative;max-width:820px;margin:0 auto">
+      <div class="screen-card" id="mockup">
+      <div class="screen-bar" id="mockup-bar">
+        <div class="dot dot-red" id="red-dot" style="background:#ff5f57" title="Click to close">
+          <span class="x-icon">✕</span>
+        </div>
         <div class="dot" style="background:#febc2e"></div>
         <div class="dot" style="background:#28c840"></div>
         <span class="url-chip">localhost:7860</span>
@@ -453,7 +521,11 @@ body::before{
           </div>
         </div>
       </div>
-    </div>
+    </div><!-- /screen-card -->
+      <div class="reopen-hint" id="reopen-hint">
+        <span>🖥️</span>Click anywhere to reopen
+      </div>
+    </div><!-- /wrapper -->
   </div>
 </section>
 
@@ -545,6 +617,7 @@ body::before{
 </footer>
 
 <script>
+// ── Copy helpers ──────────────────────────────────────────────────────────────
 function cp(id, btn) {
   navigator.clipboard.writeText(document.getElementById(id).textContent).then(() => {
     const o = btn.textContent;
@@ -560,7 +633,52 @@ function cpBlock(id, btn) {
   });
 }
 
-// Scroll-triggered reveal
+// ── Mockup window close / open ────────────────────────────────────────────────
+const mockup     = document.getElementById('mockup');
+const redDot     = document.getElementById('red-dot');
+const hint       = document.getElementById('reopen-hint');
+const bar        = document.getElementById('mockup-bar');
+let   isOpen     = true;
+let   animLocked = false;
+
+redDot.addEventListener('click', () => {
+  if (!isOpen || animLocked) return;
+  animLocked = true;
+
+  // Ripple the red dot
+  redDot.classList.add('rippling');
+  redDot.addEventListener('animationend', () => redDot.classList.remove('rippling'), { once: true });
+
+  // Close the window
+  mockup.classList.add('closing');
+  mockup.addEventListener('animationend', () => {
+    mockup.classList.remove('closing');
+    mockup.style.opacity    = '0';
+    mockup.style.pointerEvents = 'none';
+    isOpen     = false;
+    animLocked = false;
+    hint.classList.add('visible');
+  }, { once: true });
+});
+
+// Click anywhere (outside red dot) in the wrapper to reopen
+hint.parentElement.addEventListener('click', (e) => {
+  if (isOpen || animLocked || e.target === redDot || redDot.contains(e.target)) return;
+  if (!isOpen) {
+    animLocked = true;
+    hint.classList.remove('visible');
+    mockup.style.opacity       = '';
+    mockup.style.pointerEvents = '';
+    mockup.classList.add('opening');
+    mockup.addEventListener('animationend', () => {
+      mockup.classList.remove('opening');
+      isOpen     = true;
+      animLocked = false;
+    }, { once: true });
+  }
+});
+
+// ── Scroll-triggered reveal ───────────────────────────────────────────────────
 const io = new IntersectionObserver(entries => {
   entries.forEach(e => {
     if (e.isIntersecting) {
@@ -579,7 +697,7 @@ document.querySelectorAll('.feat').forEach((el, i) => {
   io.observe(el);
 });
 
-// Section labels + titles — fade up
+// Section labels + titles
 document.querySelectorAll('section:not(.hero) .s-label, section:not(.hero) .s-title').forEach((el, i) => {
   el.style.opacity    = '0';
   el.style.transform  = 'translateY(14px)';
@@ -587,7 +705,7 @@ document.querySelectorAll('section:not(.hero) .s-label, section:not(.hero) .s-ti
   io.observe(el);
 });
 
-// Install box — fade up
+// Install box
 document.querySelectorAll('.install-box').forEach(el => {
   el.style.opacity    = '0';
   el.style.transform  = 'translateY(20px)';
