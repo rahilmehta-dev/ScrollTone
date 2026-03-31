@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ScrollTone — EPUB to Audiobook</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=__V__">
 </head>
 <body>
 
@@ -17,8 +17,13 @@
     <div class="brand-sub">
       <span class="brand-sub-top">EPUB → Audiobook</span>
       <span class="brand-sub-bot">Powered by Kokoro 82M</span>
+      <span class="brand-version">v1.0.0</span>
     </div>
   </div>
+  <button class="btn-stop-app" id="stop-app-btn" onclick="stopApp()" title="Stop the ScrollTone server">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+    Stop App
+  </button>
 </div>
 
 <!-- ══ LEFT ════════════════════════════════════════════════════════════════ -->
@@ -214,7 +219,8 @@
           <div class="field">
             <label>Processing Device <i class="tip" data-tip="Auto uses Metal (MPS) on Apple Silicon — fast and efficient. CPU works everywhere but is slower. CUDA is for Nvidia GPU on Linux/Windows.">ⓘ</i></label>
             <select id="device">
-              <option value="auto" selected>Auto — GPU if available, else CPU</option>
+              <option value="auto" selected>Auto — best available</option>
+              <option value="mps">Apple Silicon (MPS)</option>
               <option value="cpu">CPU only</option>
               <option value="cuda">CUDA GPU</option>
             </select>
@@ -253,6 +259,23 @@
     </div>
   </div>
 
+  <!-- ── Row 3: Chapter selection ──────────────────────────────────────── -->
+  <div class="card ch-card" id="chapter-card" style="display:none">
+    <div class="ch-card-hdr">
+      <div class="sect" style="margin:0">Chapters</div>
+      <div class="ch-card-tools" id="ch-card-tools" style="display:none">
+        <span class="ch-count-lbl" id="ch-count-lbl"></span>
+        <button class="btn-sm" onclick="selectAllChapters(true)">All</button>
+        <button class="btn-sm" onclick="selectAllChapters(false)">None</button>
+      </div>
+    </div>
+    <div class="ch-list" id="ch-list">
+      <div class="ch-loading" id="ch-loading">
+        <span class="spinner-sm"></span> Reading chapters…
+      </div>
+    </div>
+  </div>
+
   <button class="btn-start" id="start-btn" onclick="startJob()">
     Start Converting
   </button>
@@ -268,8 +291,8 @@
     <span class="out-title">Output</span>
   </div>
 
-  <!-- Status -->
-  <div class="card">
+  <!-- ── Status + progress ──────────────────────────────────────────────── -->
+  <div class="card status-card">
     <div class="status-row">
       <div class="status-ind">
         <div class="dot" id="dot"></div>
@@ -281,40 +304,38 @@
     <div class="prog-lbl" id="prog-lbl"></div>
   </div>
 
-  <!-- Log + Files side by side -->
-  <div class="out-grid">
-
-    <!-- Log -->
-    <div class="card">
-      <div class="log-hdr">
-        <div class="sect" style="margin:0">Live Log</div>
-        <button class="btn-sm" onclick="clearLog()">Clear</button>
-      </div>
-      <div class="log-box" id="log"></div>
+  <!-- ── Chapter progress ───────────────────────────────────────────────── -->
+  <div class="card ch-prog-wrap" id="ch-prog-wrap" style="display:none">
+    <div class="ch-prog-hdr">
+      <div class="sect" style="margin:0">Chapters</div>
+      <span class="ch-prog-summary" id="ch-prog-summary"></span>
     </div>
+    <div class="ch-prog-grid" id="ch-prog-grid"></div>
+  </div>
 
-    <!-- Downloads -->
-    <div class="card">
-      <div class="sect">Output Files</div>
-      <div class="file-list" id="file-list">
-        <div class="empty">
-          <span class="ico">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" style="color:rgba(255,255,255,.2)">
-              <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
-            </svg>
-          </span>
-          <p>Files appear here as each chapter is processed.</p>
-        </div>
-      </div>
-    </div>
+  <!-- ── Saving to (subtle footer bar) ─────────────────────────────────── -->
+  <div class="out-path-bar" id="out-path-card" style="display:none">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:rgba(124,58,237,.6);flex-shrink:0">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+    </svg>
+    <span class="out-path-lbl">Saving to</span>
+    <span class="out-path-val" id="out-path-val">—</span>
+  </div>
 
-  </div><!-- end out-grid -->
+  <!-- Batch mode: book cards rendered here -->
+  <div class="out-grid" id="out-grid"></div>
+
+  <!-- Log + file-list kept alive but invisible -->
+  <div aria-hidden="true" style="display:none">
+    <div id="log"></div>
+    <div id="file-list"></div>
+  </div>
 
 </div>
 
 </main>
 <div id="toast"></div>
 
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=__V__"></script>
 </body>
 </html>

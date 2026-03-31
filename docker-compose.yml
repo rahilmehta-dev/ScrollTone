@@ -15,8 +15,8 @@ services:
     ports:
       - "7860:7860"
     volumes:
-      # Persist generated audiobooks across restarts
-      - scrolltone-outputs:/tmp/tts_outputs
+      # Persist generated audiobooks across restarts — files appear in ./audiobook_output on your Mac
+      - ./audiobook_output:/tmp/tts_outputs
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
@@ -31,5 +31,3 @@ services:
     #           count: 1
     #           capabilities: [gpu]
 
-volumes:
-  scrolltone-outputs:

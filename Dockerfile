@@ -32,6 +32,9 @@ del p"
 
 # ── Copy application ──────────────────────────────────────────────────────────
 COPY app.py .
+COPY core/ core/
+COPY routes/ routes/
+COPY static/ static/
 COPY templates/ templates/
 COPY generate_previews.py .
 

@@ -11,6 +11,7 @@ import json
 import re
 import threading
 import uuid
+import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -28,6 +29,38 @@ def _sanitize_folder_name(name: str) -> str:
     return safe[:80] or "Untitled"
 
 
+@router.post("/chapters")
+async def list_chapters(
+    file:       UploadFile = File(...),
+    min_ch_len: int        = Form(200),
+):
+    """Parse an EPUB and return its chapter list (title + char count)."""
+    import tempfile, os
+    from ebooklib import epub as _epub
+    from core.epub_parser import extract_chapters
+
+    data     = await file.read()
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+        book     = _epub.read_epub(tmp_path)
+        chapters = extract_chapters(book, min_ch_len)
+        return {
+            "chapters": [
+                {"index": i, "title": title, "chars": len(text)}
+                for i, (title, text) in enumerate(chapters)
+            ]
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    finally:
+        if tmp_path:
+            try: os.unlink(tmp_path)
+            except OSError: pass
+
+
 @router.post("/convert")
 async def convert(
     files:          list[UploadFile] = File(...),
@@ -41,17 +74,28 @@ async def convert(
     silence:        float = Form(1.0),
     min_ch_len:     int   = Form(200),
     num_workers:    int   = Form(1),
-    output_format:  str   = Form("wav"),
-    bitrate:        int   = Form(192),
-    custom_out_dir: str   = Form(""),
+    output_format:   str   = Form("wav"),
+    bitrate:         int   = Form(192),
+    custom_out_dir:  str   = Form(""),
+    chapter_indices: str   = Form(""),   # comma-separated; empty = all chapters
 ):
     batch_id = str(uuid.uuid4())
     job_ids  = []
     titles   = []
 
-    resolved_device = None if device == "auto" else device
-    # CUDA serialises inference anyway — cap at 1 worker to avoid VRAM waste
-    eff_workers = 1 if resolved_device == "cuda" else max(1, min(num_workers, 4))
+    if device == "auto":
+        import torch
+        if torch.backends.mps.is_available():
+            resolved_device = "mps"
+        elif torch.cuda.is_available():
+            resolved_device = "cuda"
+        else:
+            resolved_device = "cpu"
+    else:
+        resolved_device = device
+    # Divide the worker budget across all books so total pipelines stay bounded
+    n_books     = len(files)
+    eff_workers = max(1, min(num_workers, 4) // max(1, n_books))
 
     loop = asyncio.get_running_loop()
 
@@ -63,6 +107,17 @@ async def convert(
         up_dir.mkdir(parents=True, exist_ok=True)
         up_path = up_dir / file.filename
         up_path.write_bytes(await file.read())
+
+        # If user uploaded a .zip containing an .epub, extract it automatically
+        if up_path.suffix.lower() != ".epub" and zipfile.is_zipfile(up_path):
+            with zipfile.ZipFile(up_path) as zf:
+                epub_entries = [n for n in zf.namelist() if n.lower().endswith(".epub")]
+            if epub_entries:
+                inner_name = Path(epub_entries[0]).name
+                with zipfile.ZipFile(up_path) as zf:
+                    (up_dir / inner_name).write_bytes(zf.read(epub_entries[0]))
+                up_path.unlink()
+                up_path = up_dir / inner_name
 
         # Derive book title from EPUB metadata for the subfolder name
         try:
@@ -114,8 +169,12 @@ async def convert(
             "silence":       silence,
             "min_ch_len":    min_ch_len,
             "num_workers":   eff_workers,
-            "output_format": output_format.lower(),
-            "bitrate":       bitrate,
+            "output_format":   output_format.lower(),
+            "bitrate":         bitrate,
+            "chapter_indices": (
+                [int(x) for x in chapter_indices.split(",") if x.strip()]
+                if chapter_indices.strip() else None
+            ),
         }
 
         threading.Thread(

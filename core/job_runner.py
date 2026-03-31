@@ -98,12 +98,21 @@ def _worker(job: dict, s: dict, loop: asyncio.AbstractEventLoop) -> None:
             log("No cover image found in EPUB")
 
         chapters = extract_chapters(book, s["min_ch_len"])
+
+        sel = s.get("chapter_indices")
+        if sel is not None:
+            sel_set  = set(sel)
+            chapters = [ch for i, ch in enumerate(chapters) if i in sel_set]
+
         if not chapters:
             log("No chapters found in EPUB.")
             job["status"] = "error"
             done(); return
 
         log(f"Found {len(chapters)} chapters\n")
+        # Seed the chapter progress grid in the UI
+        _push({"type": "ch_info",
+               "chapters": [{"i": i, "title": t} for i, (t, _) in enumerate(chapters)]})
 
         book_stem   = re.sub(r"[^\w\s-]", "", Path(s["filename"]).stem)[:50]
         silence_arr = np.zeros(int(SAMPLE_RATE * s["silence"]), dtype=np.float32)
@@ -134,6 +143,9 @@ def _worker(job: dict, s: dict, loop: asyncio.AbstractEventLoop) -> None:
                         cur = sent
                 if cur: chunks.append(cur)
                 log(f"   {len(chunks)} chunks")
+                n_chunks      = len(chunks)
+                prog_interval = max(1, n_chunks // 20)   # ≤ 20 updates per chapter
+                _push({"type": "ch_start", "ch_i": ch_i, "chunks": n_chunks})
 
                 ch_audio = []
                 for c_i, chunk in enumerate(chunks):
@@ -146,9 +158,13 @@ def _worker(job: dict, s: dict, loop: asyncio.AbstractEventLoop) -> None:
                         raise
                     except Exception as e:
                         log(f"   ! Ch{ch_num} chunk {c_i + 1} skipped: {e}")
+                    if (c_i + 1) % prog_interval == 0 or c_i == n_chunks - 1:
+                        _push({"type": "ch_prog", "ch_i": ch_i,
+                               "pct": round((c_i + 1) / n_chunks, 3)})
 
                 if not ch_audio:
                     log(f"   (no audio generated)\n")
+                    _push({"type": "ch_skip", "ch_i": ch_i})
                     return (ch_i, None, None, 0.0)
 
                 combined   = np.concatenate(ch_audio)

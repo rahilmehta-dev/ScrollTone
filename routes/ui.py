@@ -2,22 +2,35 @@
 UI routes.
 
 GET /             — serve the main index.html page
+GET /config       — return runtime config (e.g. whether running inside Docker)
 GET /pick-folder  — open a native OS folder-picker and return the chosen path
 """
+import os
 import subprocess
 import sys
+import threading
+import time
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
 import core.state as state
 
+_BOOT_TS = str(int(time.time()))
+
 router = APIRouter()
 
 
 @router.get("/", response_class=HTMLResponse)
 async def index():
-    return (state.BASE_DIR / "templates" / "index.html").read_text()
+    html = (state.BASE_DIR / "templates" / "index.html").read_text()
+    return html.replace("__V__", _BOOT_TS)
+
+
+@router.get("/config")
+def config():
+    """Return runtime configuration flags for the frontend."""
+    return {"docker": os.path.exists("/.dockerenv")}
 
 
 @router.get("/pick-folder")
@@ -66,3 +79,10 @@ def pick_folder():
         pass
 
     return {"path": ""}
+
+
+@router.post("/shutdown")
+def shutdown():
+    """Stop the server process."""
+    threading.Timer(0.3, os._exit, args=(0,)).start()
+    return {"status": "shutting_down"}

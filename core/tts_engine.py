@@ -33,8 +33,15 @@ def _generate_preview(voice: str, out_path: Path) -> None:
     with state._preview_lock:
         if lang not in state._preview_pipeline:
             from kokoro import KPipeline
+            import torch
+            if torch.backends.mps.is_available():
+                _device = "mps"
+            elif torch.cuda.is_available():
+                _device = "cuda"
+            else:
+                _device = "cpu"
             state._preview_pipeline[lang] = KPipeline(
-                lang_code=lang, repo_id="hexgrad/Kokoro-82M")
+                lang_code=lang, repo_id="hexgrad/Kokoro-82M", device=_device)
         pipeline = state._preview_pipeline[lang]
         try:
             import numpy as np
