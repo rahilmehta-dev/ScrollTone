@@ -66,13 +66,36 @@ def _find_epub_cover(book):
     return None, "image/jpeg"
 
 
+def _build_toc_map(toc_items) -> dict:
+    """Walk the EPUB TOC tree and return {basename → title}."""
+    result = {}
+    for item in toc_items:
+        if isinstance(item, tuple):
+            section, children = item
+            href  = getattr(section, 'href', '') or ''
+            title = getattr(section, 'title', '') or ''
+        else:
+            href  = getattr(item, 'href', '') or ''
+            title = getattr(item, 'title', '') or ''
+            children = []
+        base = href.split('#')[0].split('/')[-1]
+        if base and title.strip() and base not in result:
+            result[base] = title.strip()
+        if children:
+            result.update(_build_toc_map(children))
+    return result
+
+
 def extract_chapters(book, min_len: int) -> list:
     """Return list of (title, text) tuples for chapters meeting the min length.
 
+    Title priority: EPUB TOC (NCX/NAV) → first H1/H2/H3 heading → "Section N".
     Bare-number headings like "1." are normalised to "Chapter 1".
     """
     import ebooklib
     from bs4 import BeautifulSoup
+
+    toc_map = _build_toc_map(book.toc)
 
     chapters = []
     for item in book.get_items():
@@ -82,15 +105,23 @@ def extract_chapters(book, min_len: int) -> list:
                 tag.decompose()
             text = re.sub(r"\s+", " ", soup.get_text(separator=" ")).strip()
             if len(text) >= min_len:
-                title_tag = soup.find(["h1", "h2", "h3"])
-                title = (
-                    title_tag.get_text().strip()
-                    if title_tag
-                    else f"Section {len(chapters) + 1}"
-                )
+                # 1. EPUB TOC
+                item_base = (getattr(item, 'file_name', None) or item.get_name() or '').split('/')[-1]
+                title = toc_map.get(item_base)
+
+                # 2. First heading in the HTML
+                if not title:
+                    tag = soup.find(["h1", "h2", "h3"])
+                    title = tag.get_text().strip() if tag else None
+
+                # 3. Fallback
+                if not title:
+                    title = f"Section {len(chapters) + 1}"
+
                 # "1." / "2" / "42." → "Chapter 1" / "Chapter 2" / "Chapter 42"
                 if re.match(r'^\d+\.?$', title.strip()):
                     title = "Chapter " + title.strip().rstrip(".")
+
                 chapters.append((title, text))
     return chapters
 

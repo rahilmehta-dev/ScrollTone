@@ -19,7 +19,8 @@ from pathlib import Path
 
 import core.state as state
 from core.epub_parser import _find_epub_cover, extract_chapters, get_book_metadata
-from core.audio_utils import write_wav, to_mp3
+from core.audio_utils import write_wav, to_mp3, enhance_wav
+from core.speaker_attribution import VoiceMapper, attribute_speakers
 
 SAMPLE_RATE = 24000   # Kokoro output sample rate
 
@@ -120,6 +121,24 @@ def _worker(job: dict, s: dict, loop: asyncio.AbstractEventLoop) -> None:
         done_lock  = threading.Lock()
         done_count = [0]
 
+        # ── Voice mapper (shared across all chapters for consistency) ─────────
+        voice_mapper = VoiceMapper(s["voice"]) if s.get("multi_voice") else None
+        if voice_mapper:
+            log(f"Multi-voice enabled  |  narrator={s['voice']}  "
+                f"model={s['ollama_model']}  url={s['ollama_url']}\n")
+
+        def _split_chunks(text: str) -> list[str]:
+            sentences = re.split(r"(?<=[.!?])\s+", text)
+            chunks, cur = [], ""
+            for sent in sentences:
+                if len(cur) + len(sent) + 1 <= s["chunk_size"]:
+                    cur = (cur + " " + sent).strip()
+                else:
+                    if cur: chunks.append(cur)
+                    cur = sent
+            if cur: chunks.append(cur)
+            return chunks
+
         # ── Per-chapter worker (runs inside ThreadPoolExecutor) ───────────────
         def process_chapter(ch_i, title, text):
             pipeline = pool.get()   # borrow — blocks if all workers are busy
@@ -132,35 +151,98 @@ def _worker(job: dict, s: dict, loop: asyncio.AbstractEventLoop) -> None:
                 log(f"── Chapter {ch_num}/{n}: {title}")
                 log(f"   {len(text):,} chars")
 
-                # Split text into sentence-boundary chunks
-                sentences = re.split(r"(?<=[.!?])\s+", text)
-                chunks, cur = [], ""
-                for sent in sentences:
-                    if len(cur) + len(sent) + 1 <= s["chunk_size"]:
-                        cur = (cur + " " + sent).strip()
-                    else:
-                        if cur: chunks.append(cur)
-                        cur = sent
-                if cur: chunks.append(cur)
-                log(f"   {len(chunks)} chunks")
-                n_chunks      = len(chunks)
-                prog_interval = max(1, n_chunks // 20)   # ≤ 20 updates per chapter
-                _push({"type": "ch_start", "ch_i": ch_i, "chunks": n_chunks})
-
                 ch_audio = []
-                for c_i, chunk in enumerate(chunks):
-                    if job["stop_event"].is_set():
-                        raise StopIteration
+
+                # ── Chapter title announcement ────────────────────────────────
+                # Prepend: 0.5 s silence → spoken title → 0.75 s silence
+                try:
+                    title_frames = []
+                    for _, _, audio in pipeline(title, voice=s["voice"], speed=s["speed"]):
+                        title_frames.append(audio)
+                    if title_frames:
+                        ch_audio.append(np.zeros(int(SAMPLE_RATE * 0.5), dtype=np.float32))
+                        ch_audio.extend(title_frames)
+                        ch_audio.append(np.zeros(int(SAMPLE_RATE * 0.75), dtype=np.float32))
+                except Exception as _te:
+                    log(f"   ! Title announcement skipped: {_te}")
+
+                if voice_mapper:
+                    # ── Multi-voice path ──────────────────────────────────────
+                    # One LLM call per chapter to attribute all dialogue
+                    log(f"   [Ollama] → {s['ollama_model']}  "
+                        f"({len(text):,} chars, {s['ollama_url']})")
                     try:
-                        for _, _, audio in pipeline(chunk, voice=s["voice"], speed=s["speed"]):
-                            ch_audio.append(audio)
-                    except StopIteration:
-                        raise
+                        segments = attribute_speakers(
+                            text, s["ollama_url"], s["ollama_model"]
+                        )
+                        dialogue = [sg for sg in segments if sg["type"] == "dialogue"]
+                        narration = [sg for sg in segments if sg["type"] == "narration"]
+                        log(f"   [Ollama] ← {len(segments)} segments  "
+                            f"({len(dialogue)} dialogue, {len(narration)} narration)")
+                        # Log each new character assignment
+                        for seg in dialogue:
+                            spk = seg.get("speaker")
+                            gen = seg.get("gender") or "?"
+                            if spk:
+                                voice = voice_mapper.get_voice(spk, seg.get("gender"))
+                                preview = seg["text"][:60].replace("\n", " ")
+                                log(f"   [Ollama]   {spk} ({gen}) → {voice}  \"{preview}…\"")
+                        log(f"   Characters so far: {voice_mapper.summary()}")
                     except Exception as e:
-                        log(f"   ! Ch{ch_num} chunk {c_i + 1} skipped: {e}")
-                    if (c_i + 1) % prog_interval == 0 or c_i == n_chunks - 1:
-                        _push({"type": "ch_prog", "ch_i": ch_i,
-                               "pct": round((c_i + 1) / n_chunks, 3)})
+                        log(f"   [Ollama] ! Attribution failed: {e}")
+                        log(f"   [Ollama] ! Falling back to single voice ({s['voice']})")
+                        segments = [{"type": "narration", "text": text,
+                                     "speaker": None, "gender": None}]
+
+                    # Flatten segments → sub-chunks with per-chunk voice
+                    voice_chunks = []
+                    for seg in segments:
+                        seg_text = seg.get("text", "").strip()
+                        if not seg_text:
+                            continue
+                        voice = voice_mapper.get_voice(seg.get("speaker"), seg.get("gender"))
+                        for sub in _split_chunks(seg_text):
+                            voice_chunks.append((voice, sub))
+
+                    n_chunks      = len(voice_chunks)
+                    prog_interval = max(1, n_chunks // 20)
+                    _push({"type": "ch_start", "ch_i": ch_i, "chunks": n_chunks})
+
+                    for c_i, (voice, chunk) in enumerate(voice_chunks):
+                        if job["stop_event"].is_set():
+                            raise StopIteration
+                        try:
+                            for _, _, audio in pipeline(chunk, voice=voice, speed=s["speed"]):
+                                ch_audio.append(audio)
+                        except StopIteration:
+                            raise
+                        except Exception as e:
+                            log(f"   ! Ch{ch_num} chunk {c_i + 1} skipped: {e}")
+                        if (c_i + 1) % prog_interval == 0 or c_i == n_chunks - 1:
+                            _push({"type": "ch_prog", "ch_i": ch_i,
+                                   "pct": round((c_i + 1) / n_chunks, 3)})
+
+                else:
+                    # ── Single-voice path (original) ──────────────────────────
+                    chunks        = _split_chunks(text)
+                    n_chunks      = len(chunks)
+                    prog_interval = max(1, n_chunks // 20)
+                    log(f"   {n_chunks} chunks")
+                    _push({"type": "ch_start", "ch_i": ch_i, "chunks": n_chunks})
+
+                    for c_i, chunk in enumerate(chunks):
+                        if job["stop_event"].is_set():
+                            raise StopIteration
+                        try:
+                            for _, _, audio in pipeline(chunk, voice=s["voice"], speed=s["speed"]):
+                                ch_audio.append(audio)
+                        except StopIteration:
+                            raise
+                        except Exception as e:
+                            log(f"   ! Ch{ch_num} chunk {c_i + 1} skipped: {e}")
+                        if (c_i + 1) % prog_interval == 0 or c_i == n_chunks - 1:
+                            _push({"type": "ch_prog", "ch_i": ch_i,
+                                   "pct": round((c_i + 1) / n_chunks, 3)})
 
                 if not ch_audio:
                     log(f"   (no audio generated)\n")
@@ -172,6 +254,12 @@ def _worker(job: dict, s: dict, loop: asyncio.AbstractEventLoop) -> None:
                 fname_wav  = f"{book_stem}_{safe_title}.wav"
                 out_wav    = os.path.join(s["out_dir"], fname_wav)
                 write_wav(out_wav, combined, SAMPLE_RATE)
+
+                if s.get("enhance"):
+                    try:
+                        enhance_wav(out_wav)
+                    except Exception as e:
+                        log(f"   ! Enhancement skipped (Ch{ch_num}): {e}")
 
                 if s.get("output_format") == "mp3":
                     fname = f"{book_stem}_{safe_title}.mp3"
@@ -253,6 +341,12 @@ def _worker(job: dict, s: dict, loop: asyncio.AbstractEventLoop) -> None:
             fname_wav = f"{book_stem}_FULL.wav"
             out_wav   = os.path.join(s["out_dir"], fname_wav)
             write_wav(out_wav, full, SAMPLE_RATE)
+
+            if s.get("enhance"):
+                try:
+                    enhance_wav(out_wav)
+                except Exception as e:
+                    log(f"! Enhancement skipped (FULL): {e}")
 
             if s.get("output_format") == "mp3":
                 fname = f"{book_stem}_FULL.mp3"

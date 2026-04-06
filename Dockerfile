@@ -38,7 +38,7 @@ COPY static/ static/
 COPY templates/ templates/
 COPY generate_previews.py .
 
-# Pre-generate voice preview samples for all 19 voices (~10 MB, instant playback in UI)
+# Pre-generate voice preview samples for all 20 voices (~10 MB, instant playback in UI)
 RUN python generate_previews.py
 
 RUN mkdir -p /tmp/tts_uploads /tmp/tts_outputs

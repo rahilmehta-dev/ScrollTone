@@ -78,6 +78,10 @@ async def convert(
     bitrate:         int   = Form(192),
     custom_out_dir:  str   = Form(""),
     chapter_indices: str   = Form(""),   # comma-separated; empty = all chapters
+    enhance:         str   = Form("false"),  # broadcast-style ffmpeg post-processing
+    multi_voice:     str   = Form("false"),  # LLM speaker attribution
+    ollama_url:      str   = Form("http://localhost:11434"),
+    ollama_model:    str   = Form("phi3:mini"),
 ):
     batch_id = str(uuid.uuid4())
     job_ids  = []
@@ -93,11 +97,11 @@ async def convert(
             resolved_device = "cpu"
     else:
         resolved_device = device
-    # Divide the worker budget across all books so total pipelines stay bounded
-    n_books     = len(files)
-    eff_workers = max(1, min(num_workers, 4) // max(1, n_books))
+    # Each book gets the full worker budget; books run sequentially to cap RAM usage
+    eff_workers = min(num_workers, 4)
 
     loop = asyncio.get_running_loop()
+    jobs_settings = []   # collected in upload order; processed sequentially below
 
     for file in files:
         job_id = str(uuid.uuid4())
@@ -130,14 +134,14 @@ async def convert(
 
         folder_name = _sanitize_folder_name(meta_title or Path(file.filename).stem)
 
-        # Resolve output directory: batch_id / book_name /
+        # Resolve output directory: book_name / (no batch UUID wrapper)
         if custom_out_dir.strip():
             out_dir = (
                 Path(custom_out_dir.strip()).expanduser().resolve()
-                / batch_id / folder_name
+                / folder_name
             )
         else:
-            out_dir = state.OUTPUT_DIR / batch_id / folder_name
+            out_dir = state.OUTPUT_DIR / folder_name
         out_dir.mkdir(parents=True, exist_ok=True)
 
         async_queue = asyncio.Queue()
@@ -147,7 +151,7 @@ async def convert(
             "id":         job_id,
             "batch_id":   batch_id,
             "book_title": meta_title or Path(file.filename).stem,
-            "status":     "running",
+            "status":     "queued",
             "queue":      async_queue,
             "stop_event": stop_event,
             "out_dir":    str(out_dir),
@@ -175,14 +179,24 @@ async def convert(
                 [int(x) for x in chapter_indices.split(",") if x.strip()]
                 if chapter_indices.strip() else None
             ),
+            "enhance":      enhance.lower() == "true",
+            "multi_voice":  multi_voice.lower() == "true",
+            "ollama_url":   ollama_url.strip() or "http://localhost:11434",
+            "ollama_model": ollama_model.strip() or "phi3:mini",
         }
 
-        threading.Thread(
-            target=_worker, args=(job, settings, loop), daemon=True
-        ).start()
-
+        jobs_settings.append((job, settings))
         job_ids.append(job_id)
         titles.append(job["book_title"])
+
+    # Run all books sequentially in one daemon thread — one book's pipelines are
+    # fully unloaded before the next book loads, keeping peak RAM predictable.
+    def _run_sequential():
+        for job, s in jobs_settings:
+            job["status"] = "running"
+            _worker(job, s, loop)
+
+    threading.Thread(target=_run_sequential, daemon=True).start()
 
     return {"batch_id": batch_id, "job_ids": job_ids, "titles": titles}
 

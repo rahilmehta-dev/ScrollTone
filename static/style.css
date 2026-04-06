@@ -39,16 +39,16 @@ body{
 /* ── Brand section ───────────────────────────────────────────────────────── */
 .brand{
   display:flex;justify-content:center;align-items:center;
-  padding:52px 0 36px;
+  padding:16px 0 16px;
   user-select:none;
   position:relative;
 }
 /* Inset container = "pressed into the material" = true neumorphic emboss */
 .brand-inset{
-  display:inline-flex;align-items:center;gap:22px;
-  padding:20px 44px;
-  border-radius:20px;
-  animation:brandIn .7s cubic-bezier(.22,1,.36,1) both, brandFloat 5s ease-in-out 1s infinite;
+  display:inline-flex;align-items:center;gap:18px;
+  padding:14px 32px;
+  border-radius:16px;
+  animation:brandIn .7s cubic-bezier(.22,1,.36,1) both;
   box-shadow:
     inset -4px -4px 10px rgba(255,255,255,.07),
     inset 5px  5px  18px rgba(0,0,0,.65);
@@ -104,25 +104,45 @@ body{
 /* ── Layout ──────────────────────────────────────────────────────────────── */
 main{
   position:relative;z-index:1;
-  max-width:1160px;margin:0 auto;
-  padding:0 44px 44px;
+  max-width:none;
+  padding:0 32px 32px;
 }
-main.has-job{ max-width:1160px; }
+main.has-job{ max-width:none; }
+
+/* ── Desktop: true two-column app layout ─────────────────────────────────── */
+@media(min-width:960px){
+  main{
+    display:grid;
+    grid-template-columns:1.15fr 0.85fr;
+    column-gap:20px;
+    align-items:start;
+  }
+  .brand{ grid-column:1/-1; }
+  #left{ grid-column:1; }
+  .out-sticky{
+    grid-column:2;
+    display:block!important;  /* always visible on desktop */
+    position:sticky;top:20px; /* stays in view while settings scroll */
+  }
+  .btn-back{ display:none!important; }   /* no panel-switching on desktop */
+  #job-banner{ display:none!important; }
+  .adv-grid{ grid-template-columns:repeat(2,1fr); } /* 3-col → 2-col in narrower right panel */
+}
+
 @media(max-width:900px){main{padding:0 16px 24px}.brand{padding:28px 0 22px}.brand-name{font-size:1.5rem}.brand-inset{padding:14px 24px;gap:14px}}
 
 /* 2-column settings grid */
 .left-grid{
   display:grid;
   grid-template-columns:1fr 1fr;
-  gap:28px;
-  align-items:stretch;   /* both columns same height */
-  margin-bottom:28px;
+  gap:18px;
+  align-items:stretch;
+  margin-bottom:18px;
 }
-.col{display:flex;flex-direction:column;gap:28px;height:100%}
+.col{display:flex;flex-direction:column;gap:14px}
 
-/* Cards in the grid fill their column */
+/* Cards in the grid */
 .left-grid>.col>.card{
-  height:100%;
   display:flex;flex-direction:column;
 }
 
@@ -134,9 +154,9 @@ main.has-job{ max-width:1160px; }
   flex:1;min-height:120px;
 }
 
-/* Right card: distribute sections evenly top-to-bottom */
+/* Right card: natural height, no forced spacing */
 .left-grid>.col:last-child>.card{
-  justify-content:space-between;
+  justify-content:flex-start;
 }
 @media(max-width:700px){
   .left-grid{grid-template-columns:1fr}
@@ -154,16 +174,10 @@ main.has-job{ max-width:1160px; }
 /* ── Neumorphic Card ─────────────────────────────────────────────────────── */
 .card{
   background:var(--surface);border-radius:var(--radius);
-  padding:28px 30px;
+  padding:20px 22px;
   box-shadow:var(--r);
   animation:fadeUp .5s ease both;
-  transition:box-shadow .25s ease, transform .25s ease;
-}
-.card:hover{
-  box-shadow:
-    -7px -7px 18px rgba(255,255,255,.065),
-     8px  8px 24px rgba(0,0,0,.78);
-  transform:translateY(-3px);
+  transition:box-shadow .25s ease;
 }
 @keyframes fadeUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
 @keyframes brandIn{from{opacity:0;transform:translateY(-12px) scale(.96)}to{opacity:1;transform:none}}
@@ -180,10 +194,10 @@ main.has-job{ max-width:1160px; }
 /* Section label */
 .sect{
   font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;
-  color:var(--txt-m);margin-bottom:20px;
+  color:var(--txt-m);margin-bottom:14px;
 }
 /* Divider */
-.div{height:1px;background:rgba(255,255,255,.05);margin:22px 0}
+.div{height:1px;background:rgba(255,255,255,.05);margin:14px 0}
 
 /* ── Upload Zone ─────────────────────────────────────────────────────────── */
 .upload-zone{
@@ -207,7 +221,7 @@ main.has-job{ max-width:1160px; }
 .up-name {font-size:.8rem;font-weight:600;color:var(--success);margin-top:8px}
 
 /* ── Form elements ───────────────────────────────────────────────────────── */
-.field{margin-bottom:22px}
+.field{margin-bottom:16px}
 .field:last-child{margin-bottom:0}
 label{
   display:flex;align-items:center;gap:6px;
@@ -269,6 +283,13 @@ select:focus,input[type=number]:focus,input[type=text]:focus{
 }
 select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,30,36)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+/* ── Settings checkboxes in Voice card ──────────────────────────────────── */
+.settings-checks{
+  display:grid;grid-template-columns:1fr 1fr;
+  gap:12px 16px;
+  margin-top:4px;
+}
 
 /* ── Checkbox ────────────────────────────────────────────────────────────── */
 .chk{
@@ -379,7 +400,7 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 .pill input{display:none}
 
 /* ── Options bar (full-width compact row) ────────────────────────────────── */
-.opts-card{ margin-bottom:28px; }
+.opts-card{ margin-bottom:0; }
 .opts-bar{
   display:flex;align-items:center;gap:28px;flex-wrap:wrap;
 }
@@ -518,9 +539,9 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 .out-grid{
   display:grid;
   grid-template-columns:3fr 2fr;
-  gap:28px;
+  gap:18px;
   align-items:stretch;
-  margin-top:28px;
+  margin-top:18px;
 }
 .out-grid>.card{
   height:100%;display:flex;flex-direction:column;
@@ -566,6 +587,30 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 .btn-back:active{box-shadow:var(--r-i)}
 .out-title{font-size:.78rem;font-weight:700;color:var(--txt-s);letter-spacing:.08em;text-transform:uppercase}
 
+/* Job-in-progress banner (settings panel) */
+.job-banner{
+  display:flex;align-items:center;gap:10px;
+  margin-bottom:18px;padding:12px 18px;
+  border-radius:var(--radius-s);cursor:pointer;
+  background:rgba(124,58,237,.12);
+  box-shadow:inset 0 0 0 1px rgba(124,58,237,.25);
+  font-size:.83rem;font-weight:600;color:#c4b5fd;
+  transition:background .2s,box-shadow .2s;
+  user-select:none;
+}
+.job-banner:hover{background:rgba(124,58,237,.2);box-shadow:inset 0 0 0 1px rgba(124,58,237,.4)}
+.job-banner-dot{
+  width:8px;height:8px;border-radius:50%;flex-shrink:0;
+  background:#a78bfa;
+  box-shadow:0 0 0 0 rgba(167,139,250,.6);
+  animation:bannerPulse 1.4s ease infinite;
+}
+@keyframes bannerPulse{
+  0%  {box-shadow:0 0 0 0   rgba(167,139,250,.6)}
+  70% {box-shadow:0 0 0 7px rgba(167,139,250,0)}
+  100%{box-shadow:0 0 0 0   rgba(167,139,250,0)}
+}
+
 
 .status-row{display:flex;align-items:center;justify-content:space-between}
 .status-ind{display:flex;align-items:center;gap:10px}
@@ -584,7 +629,7 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 .status-txt{font-weight:700;font-size:.95rem}
 
 /* ── Status card – slightly taller progress bar ─────────────────────────── */
-.status-card{margin-bottom:24px}
+.status-card{margin-bottom:14px}
 .status-card .prog-track{
   height:8px;margin:18px 0 8px;
 }
@@ -598,6 +643,20 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
   margin-bottom:24px;
 }
 .ch-prog-wrap .ch-prog-hdr{ margin-bottom:18px; }
+
+/* ── Ollama attribution log ──────────────────────────────────────────────── */
+.card.ollama-log-card{animation-delay:0s !important;margin-bottom:24px}
+.ollama-log{
+  max-height:220px;overflow-y:auto;
+  font-family:'SF Mono',ui-monospace,monospace;
+  font-size:.73rem;line-height:1.7;
+  display:flex;flex-direction:column;gap:1px;
+}
+.ol-line{padding:2px 6px;border-radius:5px;color:var(--txt-m);word-break:break-word}
+.ol-send{color:rgba(167,139,250,.8)}                       /* → request  */
+.ol-recv{color:rgba(52,211,153,.8)}                        /* ← response */
+.ol-map {color:rgba(251,191,36,.85);background:rgba(251,191,36,.06)} /* character map */
+.ol-err {color:var(--danger)}
 
 /* ── Saving-to footer bar ────────────────────────────────────────────────── */
 .out-path-bar{
@@ -669,8 +728,8 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
   box-shadow:var(--r-s),0 0 0 1px rgba(124,58,237,.25);
 }
 @keyframes fileIn{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:none}}
-.fi-name{font-size:.84rem;font-weight:600}
-.fi-meta{font-size:.73rem;color:var(--txt-s);margin-top:3px}
+.fi-ch-label{font-size:.7rem;font-weight:600;color:var(--txt-s);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px}
+.fi-title{font-size:.9rem;font-weight:700;color:var(--txt-p);line-height:1.3}
 
 /* ── Empty state ─────────────────────────────────────────────────────────── */
 .empty{text-align:center;padding:40px 20px;color:var(--txt-s)}
@@ -744,6 +803,7 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 .bc-badge.running{background:rgba(124,58,237,.2);color:#a78bfa}
 .bc-badge.done   {background:rgba(16,185,129,.15);color:var(--success)}
 .bc-badge.error  {background:rgba(239,68,68,.12); color:#f87171}
+.bc-badge.queued {background:rgba(255,255,255,.06);color:var(--txt-m)}
 
 /* Progress bar */
 .bc-bar-wrap{height:4px;border-radius:99px;background:var(--well);box-shadow:var(--r-i);overflow:hidden}
@@ -766,7 +826,7 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 .batch-grid>.book-card:nth-child(5){animation-delay:.28s}
 
 /* ══ Chapter progress grid (output panel) ════════════════════════════════════ */
-.ch-prog-wrap{margin-bottom:24px}
+.ch-prog-wrap{margin-bottom:14px}
 .ch-prog-hdr{
   display:flex;align-items:center;justify-content:space-between;
   margin-bottom:12px;

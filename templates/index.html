@@ -17,7 +17,7 @@
     <div class="brand-sub">
       <span class="brand-sub-top">EPUB → Audiobook</span>
       <span class="brand-sub-bot">Powered by Kokoro 82M</span>
-      <span class="brand-version">v1.0.0</span>
+      <span class="brand-version">v1.0.1</span>
     </div>
   </div>
   <button class="btn-stop-app" id="stop-app-btn" onclick="stopApp()" title="Stop the ScrollTone server">
@@ -28,6 +28,12 @@
 
 <!-- ══ LEFT ════════════════════════════════════════════════════════════════ -->
 <div id="left">
+
+  <!-- Job-in-progress banner (shown when user navigates back during conversion) -->
+  <div id="job-banner" class="job-banner" style="display:none" onclick="switchToOutput()">
+    <span class="job-banner-dot"></span>
+    Conversion in progress — View Progress →
+  </div>
 
   <!-- ── Row 1: 2-column grid ──────────────────────────────────────────── -->
   <div class="left-grid">
@@ -79,13 +85,13 @@
       </div>
     </div><!-- end col 1 -->
 
-    <!-- Col 2 ─ Voice, Language & Speed ────────────────────────────────── -->
-    <div class="col">
-      <div class="card">
+    <!-- Col 2 ─ Voice & Settings ───────────────────────────────────────── -->
+    <div class="col" style="height:100%">
+      <div class="card" style="flex:1;display:flex;flex-direction:column">
         <div class="sect">Voice &amp; Narration</div>
 
         <div class="field">
-          <label>Voice <i class="tip" data-tip="The narrator's voice character. af_heart is warm and expressive — best default. Click the play button to audition any voice before converting.">ⓘ</i></label>
+          <label>Narrator Voice <i class="tip" data-tip="The narrator's voice. In multi-voice mode, characters are assigned different voices automatically — this is used for narration only. af_heart is warm and expressive — best default.">ⓘ</i></label>
           <div style="display:flex;gap:9px;align-items:center">
             <select id="voice" style="flex:1" onchange="stopPreview()">
               <optgroup label="American Female">
@@ -119,65 +125,62 @@
             </select>
             <button class="btn-preview" id="preview-btn" onclick="previewVoice()" title="Preview voice">▶</button>
           </div>
-          <div id="preview-status" style="font-size:.73rem;color:var(--txt-s);margin-top:5px;min-height:16px"></div>
+          <div id="preview-status" style="font-size:.73rem;color:var(--txt-s);margin-top:4px;min-height:0"></div>
           <audio id="preview-audio"></audio>
         </div>
 
-        <div class="field">
-          <label>Language / Model <i class="tip" data-tip="Must match your book's language. Wrong language = heavy mispronunciation. For English books always use 'a' (American) or 'b' (British).">ⓘ</i></label>
-          <select id="lang">
-            <option value="a" selected>a — American English</option>
-            <option value="b">b — British English</option>
-            <option value="e">e — Spanish</option>
-            <option value="f">f — French</option>
-            <option value="h">h — Hindi</option>
-            <option value="i">i — Italian</option>
-            <option value="j">j — Japanese</option>
-            <option value="p">p — Brazilian Portuguese</option>
-            <option value="z">z — Chinese (Mandarin)</option>
-            <option value="n">n — Korean</option>
-          </select>
-        </div>
+        <input type="hidden" id="lang" value="a">
 
         <div class="div"></div>
 
-        <div class="field">
-          <label>Speech Speed <i class="tip" data-tip="1.0× is natural pace. Try 0.75× for technical books or non-native listeners. 1.25–1.5× works well for fiction. Above 1.75× can sound rushed.">ⓘ</i></label>
-          <div class="speed-header">
-            <span style="font-size:.8rem;font-weight:600;color:rgba(255,255,255,.35)">0.75 × — 2.0 ×</span>
-            <div class="speed-val" id="speed-val">1.00×</div>
+        <!-- Key settings — promoted out of Advanced -->
+        <div class="settings-checks">
+          <label class="chk">
+            <input type="checkbox" id="merge" checked>
+            Merge chapters
+            <i class="tip" data-tip="Produces one combined audiobook file in addition to the individual chapter files. Ideal for loading into Overcast, Pocket Casts, or Apple Books.">ⓘ</i>
+          </label>
+          <label class="chk">
+            <input type="checkbox" id="trf" checked>
+            Transformer G2P
+            <i class="tip" data-tip="Uses a transformer model for better pronunciation of unusual words and names. Downloads 457 MB on first use, 2–4× slower.">ⓘ</i>
+          </label>
+          <label class="chk">
+            <input type="checkbox" id="enhance" checked>
+            Enhance Audio
+            <i class="tip" data-tip="Applies compression + EQ via ffmpeg for a broadcast-ready sound. Requires ffmpeg on PATH.">ⓘ</i>
+          </label>
+          <label class="chk">
+            <input type="checkbox" id="multi_voice" onchange="toggleMultiVoice()">
+            Multi-voice
+            <span style="font-size:.58rem;font-weight:800;letter-spacing:.08em;color:rgba(251,191,36,.85);background:rgba(251,191,36,.1);padding:2px 6px;border-radius:4px;margin-left:2px">BETA</span>
+            <i class="tip" data-tip="Uses a local LLM via Ollama to detect dialogue speakers and assign different voices to each character. Requires Ollama running locally.">ⓘ</i>
+          </label>
+        </div>
+
+        <div id="mv-settings" style="display:none;margin-top:10px;padding:12px 14px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)">
+          <div class="field">
+            <label>Ollama URL</label>
+            <input type="text" id="ollama_url" value="http://localhost:11434" style="font-family:monospace;font-size:.82rem" placeholder="http://localhost:11434">
           </div>
-          <div class="speed-row">
-            <input type="range" id="speed" min="0.75" max="2.0" step="0.05" value="1.0">
-          </div>
-          <div class="speed-ticks">
-            <button class="stk" style="left:0%"   onclick="setSpd(0.75)"><span class="stk-dot"></span><span class="stk-lbl">0.75 ×</span></button>
-            <button class="stk" style="left:20%"  onclick="setSpd(1.0)" ><span class="stk-dot"></span><span class="stk-lbl">1.0 ×</span></button>
-            <button class="stk" style="left:40%"  onclick="setSpd(1.25)"><span class="stk-dot"></span><span class="stk-lbl">1.25 ×</span></button>
-            <button class="stk" style="left:60%"  onclick="setSpd(1.5)" ><span class="stk-dot"></span><span class="stk-lbl">1.5 ×</span></button>
-            <button class="stk" style="left:80%"  onclick="setSpd(1.75)"><span class="stk-dot"></span><span class="stk-lbl">1.75 ×</span></button>
-            <button class="stk" style="left:100%" onclick="setSpd(2.0)" ><span class="stk-dot"></span><span class="stk-lbl">2.0 ×</span></button>
+          <div class="field" style="margin-top:8px;margin-bottom:0">
+            <label>Model <i class="tip" data-tip="Smaller = faster but may miss complex attribution. phi3:mini is the best balance of speed and accuracy.">ⓘ</i></label>
+            <select id="ollama_model">
+              <option value="phi3:mini">phi3:mini — ~2 GB RAM (recommended)</option>
+              <option value="llama3.2:1b">llama3.2:1b — ~1 GB RAM (fastest)</option>
+              <option value="llama3.2:3b">llama3.2:3b — ~2.5 GB RAM (best quality)</option>
+              <option value="llama3.1:8b">llama3.1:8b — ~5 GB RAM (highest quality)</option>
+            </select>
           </div>
         </div>
 
-      </div>
-    </div><!-- end col 2 -->
+      </div><!-- end Voice card -->
 
-  </div><!-- end left-grid -->
-
-  <!-- ── Row 2: Output settings — full width compact bar ──────────────── -->
+      <!-- Output Settings sits below Voice card -->
   <div class="card opts-card">
     <div class="opts-bar">
 
-      <div class="sect" style="margin:0;flex-shrink:0">Output Settings</div>
-
-      <div class="opts-sep"></div>
-
-      <label class="chk" style="flex-shrink:0;gap:8px">
-        <input type="checkbox" id="merge" checked>
-        Merge chapters
-        <i class="tip" data-tip="Produces one combined audiobook file in addition to the individual chapter files. Ideal for loading into Overcast, Pocket Casts, or Apple Books.">ⓘ</i>
-      </label>
+      <div class="sect" style="margin:0;flex-shrink:0">Output</div>
 
       <div class="opts-sep"></div>
 
@@ -217,6 +220,23 @@
       <div style="margin-top:18px;padding-top:16px;border-top:1px solid rgba(255,255,255,.05)">
         <div class="adv-grid">
           <div class="field">
+            <label>Speech Speed <i class="tip" data-tip="1.0× is natural pace. Try 0.75× for technical books or non-native listeners. 1.25–1.5× works well for fiction. Above 1.75× can sound rushed.">ⓘ</i></label>
+            <div class="speed-header">
+              <div class="speed-val" id="speed-val">0.95×</div>
+            </div>
+            <div class="speed-row">
+              <input type="range" id="speed" min="0.75" max="2.0" step="0.05" value="0.95">
+            </div>
+            <div class="speed-ticks">
+              <button class="stk" style="left:0%"   onclick="setSpd(0.75)"><span class="stk-dot"></span><span class="stk-lbl">0.75×</span></button>
+              <button class="stk" style="left:20%"  onclick="setSpd(1.0)" ><span class="stk-dot"></span><span class="stk-lbl">1.0×</span></button>
+              <button class="stk" style="left:40%"  onclick="setSpd(1.25)"><span class="stk-dot"></span><span class="stk-lbl">1.25×</span></button>
+              <button class="stk" style="left:60%"  onclick="setSpd(1.5)" ><span class="stk-dot"></span><span class="stk-lbl">1.5×</span></button>
+              <button class="stk" style="left:80%"  onclick="setSpd(1.75)"><span class="stk-dot"></span><span class="stk-lbl">1.75×</span></button>
+              <button class="stk" style="left:100%" onclick="setSpd(2.0)" ><span class="stk-dot"></span><span class="stk-lbl">2.0×</span></button>
+            </div>
+          </div>
+          <div class="field">
             <label>Processing Device <i class="tip" data-tip="Auto uses Metal (MPS) on Apple Silicon — fast and efficient. CPU works everywhere but is slower. CUDA is for Nvidia GPU on Linux/Windows.">ⓘ</i></label>
             <select id="device">
               <option value="auto" selected>Auto — best available</option>
@@ -246,20 +266,16 @@
             <label>Min Chapter Length <i class="tip" data-tip="Chapters shorter than this number of characters are skipped. Prevents generating audio for copyright pages, blank sections, and table-of-contents entries.">ⓘ</i></label>
             <input type="number" id="min_ch_len" value="200" min="50" max="2000">
           </div>
-          <div class="field" style="display:flex;align-items:flex-end">
-            <label class="chk">
-              <input type="checkbox" id="trf">
-              Transformer G2P
-              <i class="tip" data-tip="Uses a transformer model to look up correct pronunciations for unusual words, names, and abbreviations. Much better quality — but downloads 457 MB extra on first use and is 2–4× slower. Recommended for non-fiction or proper-noun-heavy books.">ⓘ</i>
-            </label>
-          </div>
         </div>
       </div>
       </div>
     </div>
-  </div>
+  </div><!-- end opts-card -->
 
-  <!-- ── Row 3: Chapter selection ──────────────────────────────────────── -->
+    </div><!-- end col 2 -->
+  </div><!-- end left-grid -->
+
+  <!-- ── Row 2 (full-width): Chapter selection ─────────────────────────── -->
   <div class="card ch-card" id="chapter-card" style="display:none">
     <div class="ch-card-hdr">
       <div class="sect" style="margin:0">Chapters</div>
@@ -320,6 +336,15 @@
     </svg>
     <span class="out-path-lbl">Saving to</span>
     <span class="out-path-val" id="out-path-val">—</span>
+  </div>
+
+  <!-- ── Ollama attribution log (multi-voice only) ────────────────────────── -->
+  <div class="card ollama-log-card" id="ollama-log-card" style="display:none">
+    <div class="ch-prog-hdr">
+      <div class="sect" style="margin:0">LLM Attribution</div>
+      <span class="ch-prog-summary" id="ollama-log-summary"></span>
+    </div>
+    <div class="ollama-log" id="ollama-log"></div>
   </div>
 
   <!-- Batch mode: book cards rendered here -->

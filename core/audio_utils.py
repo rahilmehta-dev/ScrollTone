@@ -3,8 +3,47 @@ Audio file utilities.
 
 Responsibilities:
 - Writing numpy arrays to WAV files
+- Applying broadcast-style audio enhancement via ffmpeg (optional)
 - Converting WAV to MP3 with embedded ID3 metadata and cover art
 """
+
+
+def enhance_wav(path: str) -> None:
+    """Apply broadcast-style audio enhancement to a WAV file (in-place).
+
+    Pipeline:
+      1. Compression  — evens out loud/quiet (threshold=-18dB, ratio=3:1, attack=5ms, release=50ms)
+      2. EQ +2dB @ 200 Hz — adds warmth/depth to the voice
+      3. EQ -1dB @ 8 kHz  — reduces harshness/sibilance
+
+    Requires ffmpeg to be available on PATH.
+    If ffmpeg fails the original file is left untouched.
+    """
+    import os
+    import subprocess
+
+    tmp = path + ".enhanced.wav"
+    try:
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", path,
+                "-af",
+                "acompressor=threshold=-18dB:ratio=3:attack=5:release=50,"
+                "equalizer=f=200:width_type=o:width=2:g=2,"
+                "equalizer=f=8000:width_type=o:width=2:g=-1",
+                tmp,
+            ],
+            check=True,
+            capture_output=True,
+        )
+        os.replace(tmp, path)
+    except Exception:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        raise
 
 
 def write_wav(path: str, audio_array, sample_rate: int = 24000) -> None:

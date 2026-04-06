@@ -1,7 +1,8 @@
 // ─── State ────────────────────────────────────────────────────────────────────
-let jobId    = null;
-let es       = null;
-let _fileIdx = 0;  // for staggered file-item entrance animation
+let jobId       = null;
+let es          = null;
+let _fileIdx    = 0;  // for staggered file-item entrance animation
+let _jobRunning = false;  // true while any conversion is in progress
 
 // Batch state (multi-EPUB)
 let batchJobIds = [];
@@ -24,6 +25,11 @@ fetch('/config').then(r => r.json()).then(d => {
   // Update hint text
   const hint = document.querySelector('#out_dir')?.closest('.field')?.querySelector('div[style*="margin-top"]');
   if (hint) hint.textContent = 'Running in Docker. Output files appear in the audiobook_output/ folder next to your docker-compose.yml.';
+  // In Docker, localhost = the container. Ollama runs on the host, so use host.docker.internal.
+  const ollamaInp = document.getElementById('ollama_url');
+  if (ollamaInp && ollamaInp.value.includes('localhost')) {
+    ollamaInp.value = 'http://host.docker.internal:11434';
+  }
 }).catch(() => {});
 
 // ─── File drag & drop ─────────────────────────────────────────────────────────
@@ -177,39 +183,55 @@ function setSpd(v) {
   _updateSpd(v);
 }
 // init active dot on load
-_updateSpd(1.0);
+_updateSpd(0.95);
 
 // ─── Panel switching ──────────────────────────────────────────────────────────
 function switchToOutput() {
-  const left = document.getElementById('left');
-  const out  = document.querySelector('.out-sticky');
-  const main = document.querySelector('main');
+  const left   = document.getElementById('left');
+  const out    = document.querySelector('.out-sticky');
+  const main   = document.querySelector('main');
+  const banner = document.getElementById('job-banner');
 
-  // Animate left panel out
+  if (banner) banner.style.display = 'none';
+
+  // Desktop two-column layout: both panels always visible — just activate output
+  if (window.innerWidth >= 960) {
+    main.classList.add('has-job');
+    out.classList.add('active');
+    return;
+  }
+
+  // Mobile: animate left panel out, show output
   left.classList.add('slide-out');
   setTimeout(() => {
     left.style.display = 'none';
     left.classList.remove('slide-out');
-    // Expand main and show output
     main.classList.add('has-job');
     out.classList.add('active');
   }, 250);
 }
 
 function backToSettings() {
-  const left = document.getElementById('left');
-  const out  = document.querySelector('.out-sticky');
-  const main = document.querySelector('main');
+  const left   = document.getElementById('left');
+  const out    = document.querySelector('.out-sticky');
+  const main   = document.querySelector('main');
+  const banner = document.getElementById('job-banner');
 
-  // Close all batch SSE connections
-  Object.values(batchSources).forEach(s => s.close());
-  batchSources = {};
+  if (_jobRunning) {
+    if (banner) banner.style.display = 'flex';
+  } else {
+    Object.values(batchSources).forEach(s => s.close());
+    batchSources = {};
+    if (banner) banner.style.display = 'none';
+  }
 
-  // Hide output, shrink main, restore settings
+  // Desktop: both panels always visible, nothing to swap
+  if (window.innerWidth >= 960) return;
+
+  // Mobile: restore settings panel
   out.classList.remove('active');
   main.classList.remove('has-job');
   left.style.display = '';
-  // Re-trigger entrance animation
   void left.offsetWidth;
   left.style.animation = 'fadeUp .35s ease both';
   setTimeout(() => { left.style.animation = ''; }, 400);
@@ -237,6 +259,12 @@ async function pickFolder() {
 function toggleAdv() {
   document.getElementById('adv-btn').classList.toggle('open');
   document.getElementById('adv-body').classList.toggle('open');
+}
+
+// ─── Multi-voice toggle ───────────────────────────────────────────────────────
+function toggleMultiVoice() {
+  const enabled = document.getElementById('multi_voice').checked;
+  document.getElementById('mv-settings').style.display = enabled ? 'block' : 'none';
 }
 
 // ─── Format toggle ────────────────────────────────────────────────────────────
@@ -267,6 +295,10 @@ async function startJob() {
   fd.append('bitrate',         document.getElementById('bitrate').value);
   fd.append('custom_out_dir',  document.getElementById('out_dir').value.trim());
   fd.append('chapter_indices', _getChapterIndices());
+  fd.append('enhance',         document.getElementById('enhance').checked);
+  fd.append('multi_voice',     document.getElementById('multi_voice').checked);
+  fd.append('ollama_url',      document.getElementById('ollama_url').value.trim());
+  fd.append('ollama_model',    document.getElementById('ollama_model').value);
 
   switchToOutput();
   resetOutput();
@@ -278,6 +310,7 @@ async function startJob() {
   if (pathCard) pathCard.style.display = 'block';
   if (pathVal)  pathVal.textContent    = outDir || 'audiobook_output/ (default)';
 
+  _jobRunning = true;
   setDot('running'); setStatus('Starting…');
   document.getElementById('start-btn').disabled = true;
   document.getElementById('start-btn').textContent = 'Converting…';
@@ -316,7 +349,10 @@ function connectSSE(id) {
 }
 
 function handleMsg(m) {
-  if      (m.type === 'log')      addLog(m.msg);
+  if (m.type === 'log') {
+    if (m.msg.includes('[Ollama]')) addOllamaLog(m.msg);
+    else addLog(m.msg);
+  }
   else if (m.type === 'status')   setStatus(m.msg);
   else if (m.type === 'progress') setProg(m.value, m.label);
   else if (m.type === 'file')     { addFile(m); if (m.chapter > 0) _chDone(m.chapter - 1, m.duration); }
@@ -329,9 +365,12 @@ function handleMsg(m) {
 
 function onDone(files) {
   if (es) es.close();
+  _jobRunning = false;
   setDot('done'); setStatus('Done!');
   setProg(1, 'Conversion complete');
   resetBtns();
+  const banner = document.getElementById('job-banner');
+  if (banner) banner.style.display = 'none';
   if (files && files.length) toast('✓ ' + files.length + ' file(s) ready');
 }
 
@@ -342,9 +381,9 @@ function connectBatchSSE(jobIds) {
 
   jobIds.forEach((id, i) => {
     batchState[id] = {
-      status: 'running',
+      status: i === 0 ? 'running' : 'queued',
       title:  batchJobIds[i] ? (window._batchTitles && window._batchTitles[i]) || ('Book ' + (i+1)) : ('Book ' + (i+1)),
-      lastLog: 'Starting…',
+      lastLog: i === 0 ? 'Starting…' : 'Waiting in queue…',
       files:   [],
       totalDur: 0,
     };
@@ -366,8 +405,12 @@ function handleBatchMsg(id, m) {
 
   if (m.type === 'log') {
     const txt = m.msg.trim();
-    if (!txt.startsWith('[MEM]')) { s.lastLog = txt; updateBookCard(id); }
+    if (!txt.startsWith('[MEM]')) {
+      if (s.status === 'queued') s.status = 'running';
+      s.lastLog = txt; updateBookCard(id);
+    }
   } else if (m.type === 'status') {
+    if (s.status === 'queued') s.status = 'running';
     s.lastLog = m.msg;
     updateBookCard(id);
   } else if (m.type === 'progress') {
@@ -388,16 +431,20 @@ function handleBatchMsg(id, m) {
 
 function checkBatchComplete() {
   const allDone = batchJobIds.every(id =>
-    batchState[id] && (batchState[id].status === 'done' || batchState[id].status === 'error')
+    batchState[id] && (batchState[id].status === 'done' || batchState[id].status === 'error') &&
+    batchState[id].status !== 'queued'
   );
   if (allDone) {
     const doneCount  = batchJobIds.filter(id => batchState[id] && batchState[id].status === 'done').length;
     const errorCount = batchJobIds.filter(id => batchState[id] && batchState[id].status === 'error').length;
+    _jobRunning = false;
     setDot('done');
     setStatus('Complete — ' + doneCount + ' book(s) converted' +
               (errorCount ? ', ' + errorCount + ' error(s)' : ''));
     setProg(1, '');
     resetBtns();
+    const banner = document.getElementById('job-banner');
+    if (banner) banner.style.display = 'none';
     toast('✓ ' + doneCount + ' book(s) converted successfully');
   } else {
     const pending = batchJobIds.filter(id => batchState[id] && batchState[id].status === 'running').length;
@@ -469,6 +516,9 @@ function updateBookCard(id) {
       badgeEl.textContent = '✗ Error';
       badgeEl.className = 'bc-badge error';
       card.classList.add('bc-error');
+    } else if (s.status === 'queued') {
+      badgeEl.textContent = '· Queued';
+      badgeEl.className = 'bc-badge queued';
     } else {
       badgeEl.innerHTML = '<span class="spinner"></span>';
       badgeEl.className = 'bc-badge running';
@@ -605,6 +655,37 @@ function setProg(v, lbl) {
   document.getElementById('prog-lbl').textContent  = lbl || '';
 }
 
+function addOllamaLog(raw) {
+  const card = document.getElementById('ollama-log-card');
+  const box  = document.getElementById('ollama-log');
+  const sum  = document.getElementById('ollama-log-summary');
+  if (!box) return;
+  if (card) card.style.display = 'block';
+
+  raw.split('\n').forEach(line => {
+    line = line.trim();
+    if (!line) return;
+    // Strip the [Ollama] prefix for cleaner display
+    const text = line.replace(/\[Ollama\]\s*/g, '').trim();
+    if (!text) return;
+
+    const d = document.createElement('div');
+    d.className = 'ol-line';
+    if (line.includes('!'))          d.classList.add('ol-err');
+    else if (line.includes('←'))     d.classList.add('ol-recv');
+    else if (line.includes('→'))     d.classList.add('ol-send');
+    else if (line.includes('Characters')) d.classList.add('ol-map');
+    d.textContent = text;
+    box.appendChild(d);
+  });
+
+  // Update summary: count unique characters from "Characters so far:" lines
+  const mapLine = [...box.querySelectorAll('.ol-map')].pop();
+  if (mapLine && sum) sum.textContent = mapLine.textContent;
+
+  box.scrollTop = box.scrollHeight;
+}
+
 function addLog(raw, cls) {
   const box = document.getElementById('log');
   if (!box) return;
@@ -634,13 +715,15 @@ function addFile(f) {
   const dur  = mins > 0 ? mins + 'm ' + secs + 's' : secs + 's';
   const icon = '';
 
+  const chLabel = f.chapter === 0 ? 'Full Audiobook' : 'Chapter ' + f.chapter;
+
   const el = document.createElement('div');
   el.className = 'file-item' + (f.chapter === 0 ? ' full' : '');
   el.style.animationDelay = (_fileIdx++ * 0.07) + 's';
   el.innerHTML =
     '<div>' +
-      '<div class="fi-name">' + icon + ' ' + esc(f.filename) + '</div>' +
-      '<div class="fi-meta">' + esc(f.title) + ' · ' + dur + '</div>' +
+      '<div class="fi-ch-label">' + chLabel + ' · ' + dur + '</div>' +
+      '<div class="fi-title">' + esc(f.title) + '</div>' +
     '</div>' +
     '<a class="btn-sm" href="/download/' + jobId + '/' +
       encodeURIComponent(f.filename) + '" download="' + esc(f.filename) + '">↓ Save</a>';
@@ -662,6 +745,19 @@ function resetOutput() {
   const grid = document.getElementById('ch-prog-grid');
   if (wrap) wrap.style.display = 'none';
   if (grid) grid.innerHTML = '';
+
+  _jobRunning = false;
+  // Hide job banner
+  const banner = document.getElementById('job-banner');
+  if (banner) banner.style.display = 'none';
+
+  // Clear Ollama log
+  const olCard = document.getElementById('ollama-log-card');
+  const olBox  = document.getElementById('ollama-log');
+  const olSum  = document.getElementById('ollama-log-summary');
+  if (olCard) olCard.style.display = 'none';
+  if (olBox)  olBox.innerHTML = '';
+  if (olSum)  olSum.textContent = '';
 
   // Clear batch grid, hide out-path card, wipe log + file-list content
   const outGrid  = document.getElementById('out-grid');

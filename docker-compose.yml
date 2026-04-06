@@ -22,6 +22,8 @@ services:
     restart: unless-stopped
     mem_limit: 20g
     memswap_limit: 22g   # 2 g of swap headroom on top of RAM (prevents OOM on spikes)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # lets the container reach Ollama on the host (Linux fix)
     # Uncomment for GPU support (requires nvidia-docker):
     # deploy:
     #   resources:

@@ -1,3 +1,15 @@
+# ── System dependencies (install separately — not pip packages) ───────────────
+# ffmpeg        — required for the "Enhance Audio" feature (broadcast EQ/compression).
+#                 macOS:  brew install ffmpeg
+#                 Linux:  sudo apt install ffmpeg   (Debian/Ubuntu)
+#                         sudo dnf install ffmpeg   (Fedora/RHEL)
+#                 Docker: already included in the image via apt-get in the Dockerfile.
+#
+# libsndfile    — required by soundfile for WAV I/O.
+#                 macOS:  brew install libsndfile
+#                 Linux:  sudo apt install libsndfile1
+# ─────────────────────────────────────────────────────────────────────────────
+
 fastapi>=0.104.0
 psutil>=5.9.0
 pydub>=0.25.1
