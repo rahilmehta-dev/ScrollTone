@@ -10,7 +10,7 @@ let batchSources = {};
 let batchState   = {};
 
 // ─── Docker detection ─────────────────────────────────────────────────────────
-fetch('/config').then(r => r.json()).then(d => {
+fetch('/api/config').then(r => r.json()).then(d => {
   if (!d.docker) return;
   // Hide folder picker button — can't open native dialog in a headless container
   const btn = document.getElementById('folder-btn');
@@ -104,7 +104,7 @@ async function fetchChapters(file) {
   fd.append('min_ch_len', minChLen);
 
   try {
-    const r = await fetch('/chapters', { method: 'POST', body: fd });
+    const r = await fetch('/api/chapters', { method: 'POST', body: fd });
     if (!r.ok) {
       let detail = '';
       try { detail = (await r.json()).detail || ''; } catch(_) {}
@@ -242,7 +242,7 @@ async function pickFolder() {
   const btn = document.getElementById('folder-btn');
   btn.disabled = true; btn.textContent = '…';
   try {
-    const r = await fetch('/pick-folder');
+    const r = await fetch('/api/pick-folder');
     const d = await r.json();
     if (d.path) {
       document.getElementById('out_dir').value = d.path;
@@ -317,7 +317,7 @@ async function startJob() {
   document.getElementById('stop-btn').style.display = 'inline-flex';
 
   try {
-    const r = await fetch('/convert', { method: 'POST', body: fd });
+    const r = await fetch('/api/convert', { method: 'POST', body: fd });
     if (!r.ok) throw new Error('Server error ' + r.status);
     const d = await r.json();
 
@@ -343,7 +343,7 @@ async function startJob() {
 // ─── SSE (single-book) ────────────────────────────────────────────────────────
 function connectSSE(id) {
   if (es) es.close();
-  es = new EventSource('/stream/' + id);
+  es = new EventSource('/api/stream/' + id);
   es.onmessage = e => { try { handleMsg(JSON.parse(e.data)); } catch(_) {} };
   es.onerror   = () => { es.close(); addLog('Connection lost.', 'warn'); };
 }
@@ -387,7 +387,7 @@ function connectBatchSSE(jobIds) {
       files:   [],
       totalDur: 0,
     };
-    const src = new EventSource('/stream/' + id);
+    const src = new EventSource('/api/stream/' + id);
     src.onmessage = e => { try { handleBatchMsg(id, JSON.parse(e.data)); } catch(_) {} };
     src.onerror   = () => {
       src.close();
@@ -554,7 +554,7 @@ function downloadAll(jobId, filenames) {
   filenames.forEach((fname, i) => {
     setTimeout(() => {
       const a = document.createElement('a');
-      a.href     = '/download/' + jobId + '/' + encodeURIComponent(fname);
+      a.href     = '/api/download/' + jobId + '/' + encodeURIComponent(fname);
       a.download = fname;
       document.body.appendChild(a);
       a.click();
@@ -637,11 +637,11 @@ function _updateChSummary() {
 // ─── Stop ─────────────────────────────────────────────────────────────────────
 function stopJob() {
   if (batchJobIds.length > 1) {
-    batchJobIds.forEach(id => fetch('/stop/' + id, { method: 'POST' }));
+    batchJobIds.forEach(id => fetch('/api/stop/' + id, { method: 'POST' }));
     Object.values(batchSources).forEach(s => s.close());
     batchSources = {};
   } else if (jobId) {
-    fetch('/stop/' + jobId, { method: 'POST' });
+    fetch('/api/stop/' + jobId, { method: 'POST' });
   }
   setStatus('Stopping…');
   document.getElementById('stop-btn').disabled = true;
@@ -725,7 +725,7 @@ function addFile(f) {
       '<div class="fi-ch-label">' + chLabel + ' · ' + dur + '</div>' +
       '<div class="fi-title">' + esc(f.title) + '</div>' +
     '</div>' +
-    '<a class="btn-sm" href="/download/' + jobId + '/' +
+    '<a class="btn-sm" href="/api/download/' + jobId + '/' +
       encodeURIComponent(f.filename) + '" download="' + esc(f.filename) + '">↓ Save</a>';
   list.appendChild(el);
 }
@@ -802,7 +802,7 @@ async function previewVoice() {
   status.textContent = 'Loading ' + voice + '…';
 
   try {
-    const resp = await fetch('/preview/' + voice);
+    const resp = await fetch('/api/preview/' + voice);
     if (!resp.ok) throw new Error('server error ' + resp.status);
     const blob = await resp.blob();
     if (_previewURL) URL.revokeObjectURL(_previewURL);
@@ -834,7 +834,7 @@ async function stopApp() {
   btn.disabled = true;
   btn.innerHTML = '… Stopping';
   try {
-    await fetch('/shutdown', { method: 'POST' });
+    await fetch('/api/shutdown', { method: 'POST' });
   } catch(_) {}
   btn.innerHTML = '✓ Stopped';
   toast('Server stopped — you can close this tab.');

@@ -33,13 +33,11 @@ del p"
 # ── Copy application ──────────────────────────────────────────────────────────
 COPY app.py .
 COPY core/ core/
-COPY routes/ routes/
-COPY static/ static/
-COPY templates/ templates/
-COPY generate_previews.py .
+COPY api/ api/
+COPY scripts/ scripts/
 
 # Pre-generate voice preview samples for all 20 voices (~10 MB, instant playback in UI)
-RUN python generate_previews.py
+RUN python scripts/generate_previews.py
 
 RUN mkdir -p /tmp/tts_uploads /tmp/tts_outputs
 

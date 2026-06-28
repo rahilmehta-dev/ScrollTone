@@ -9,21 +9,25 @@ version: "3.9"
 # Exit code 137 = OOM kill → increase mem_limit or reduce workers in the UI.
 
 services:
-  scrolltone:
-    build: .
-    container_name: scrolltone
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scrolltone-backend
+    # Port 7860 is the raw API — accessible for debugging, not needed for normal use
     ports:
       - "7860:7860"
     volumes:
-      # Persist generated audiobooks across restarts — files appear in ./audiobook_output on your Mac
+      # Persist generated audiobooks across restarts
       - ./audiobook_output:/tmp/tts_outputs
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
     mem_limit: 20g
-    memswap_limit: 22g   # 2 g of swap headroom on top of RAM (prevents OOM on spikes)
+    memswap_limit: 22g
     extra_hosts:
-      - "host.docker.internal:host-gateway"  # lets the container reach Ollama on the host (Linux fix)
+      - "host.docker.internal:host-gateway"
     # Uncomment for GPU support (requires nvidia-docker):
     # deploy:
     #   resources:
@@ -33,3 +37,13 @@ services:
     #           count: 1
     #           capabilities: [gpu]
 
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: scrolltone-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

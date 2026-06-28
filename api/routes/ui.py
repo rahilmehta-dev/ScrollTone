@@ -1,30 +1,20 @@
 """
-UI routes.
+UI system routes.
 
-GET /             — serve the main index.html page
 GET /config       — return runtime config (e.g. whether running inside Docker)
 GET /pick-folder  — open a native OS folder-picker and return the chosen path
+POST /shutdown    — stop the server process
 """
 import os
 import subprocess
 import sys
 import threading
-import time
 
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
 
 import core.state as state
 
-_BOOT_TS = str(int(time.time()))
-
 router = APIRouter()
-
-
-@router.get("/", response_class=HTMLResponse)
-async def index():
-    html = (state.BASE_DIR / "templates" / "index.html").read_text()
-    return html.replace("__V__", _BOOT_TS)
 
 
 @router.get("/config")

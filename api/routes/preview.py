@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 import core.state as state
-from core.tts_engine import KNOWN_VOICES, _generate_preview
+from core.tts.kokoro import KNOWN_VOICES, _generate_preview
 
 router = APIRouter()
 

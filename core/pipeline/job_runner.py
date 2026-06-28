@@ -18,9 +18,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import core.state as state
-from core.epub_parser import _find_epub_cover, extract_chapters, get_book_metadata
-from core.audio_utils import write_wav, to_mp3, enhance_wav
-from core.speaker_attribution import VoiceMapper, attribute_speakers
+from core.epub.parser import _find_epub_cover, extract_chapters, get_book_metadata
+from core.pipeline.audio_post import write_wav, to_mp3, enhance_wav
+from core.tts.voices import VoiceMapper
+from core.attribution.ollama import attribute_speakers
 
 SAMPLE_RATE = 24000   # Kokoro output sample rate
 

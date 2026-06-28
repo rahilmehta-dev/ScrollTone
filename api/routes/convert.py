@@ -18,7 +18,8 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
 import core.state as state
-from core.job_runner import _worker
+from core.epub.parser import extract_chapters, get_book_metadata
+from core.pipeline.job_runner import _worker
 
 router = APIRouter()
 
@@ -37,7 +38,6 @@ async def list_chapters(
     """Parse an EPUB and return its chapter list (title + char count)."""
     import tempfile, os
     from ebooklib import epub as _epub
-    from core.epub_parser import extract_chapters
 
     data     = await file.read()
     tmp_path = None
@@ -126,7 +126,6 @@ async def convert(
         # Derive book title from EPUB metadata for the subfolder name
         try:
             from ebooklib import epub as _epub
-            from core.epub_parser import get_book_metadata
             book       = _epub.read_epub(str(up_path))
             meta_title = get_book_metadata(book).get("title", "").strip()
         except Exception:

@@ -15,24 +15,27 @@ warnings.filterwarnings("ignore", message=r"`torch\.jit\.script` is deprecated")
 warnings.filterwarnings("ignore", message="open_text is deprecated")
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
+from fastapi import APIRouter
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 import core.state as state        # initialises dirs on import
-from routes import convert, preview, ui
+from api.routes import convert, preview, ui
 
 app = FastAPI(title="ScrollTone")
 
-# Serve static assets (CSS, JS) from /static
-app.mount(
-    "/static",
-    StaticFiles(directory=str(state.BASE_DIR / "static")),
-    name="static",
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-app.include_router(ui.router)
-app.include_router(preview.router)
-app.include_router(convert.router)
+api_router = APIRouter(prefix="/api")
+api_router.include_router(ui.router)
+api_router.include_router(preview.router)
+api_router.include_router(convert.router)
+app.include_router(api_router)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=7860, reload=False)
