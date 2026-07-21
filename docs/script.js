@@ -1,16 +1,16 @@
 // ── Copy helpers ──────────────────────────────────────────────────────────────
-function cp(id, btn) {
+function copyText(id, btn) {
   navigator.clipboard.writeText(document.getElementById(id).textContent).then(() => {
-    const o = btn.textContent;
+    const original = btn.textContent;
     btn.textContent = 'Copied!'; btn.classList.add('ok');
-    setTimeout(() => { btn.textContent = o; btn.classList.remove('ok'); }, 2000);
+    setTimeout(() => { btn.textContent = original; btn.classList.remove('ok'); }, 2000);
   });
 }
-function cpBlock(id, btn) {
+function copyBlock(id, btn) {
   navigator.clipboard.writeText(document.getElementById(id).innerText).then(() => {
-    const o = btn.textContent;
+    const original = btn.textContent;
     btn.textContent = 'Copied!'; btn.classList.add('ok');
-    setTimeout(() => { btn.textContent = o; btn.classList.remove('ok'); }, 2000);
+    setTimeout(() => { btn.textContent = original; btn.classList.remove('ok'); }, 2000);
   });
 }
 

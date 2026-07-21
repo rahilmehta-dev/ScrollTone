@@ -49,9 +49,9 @@ def _find_epub_cover(book):
     # Strategy 3: "cover" in file name or item id
     for item in book.get_items():
         if item.get_type() == ebooklib.ITEM_IMAGE:
-            name = (getattr(item, 'file_name', '') or item.get_name() or '').lower()
-            iid  = (item.get_id() or '').lower()
-            if 'cover' in name or 'cover' in iid:
+            name    = (getattr(item, 'file_name', '') or item.get_name() or '').lower()
+            item_id = (item.get_id() or '').lower()
+            if 'cover' in name or 'cover' in item_id:
                 data = item.get_content()
                 if data:
                     return data, item.media_type or "image/jpeg"

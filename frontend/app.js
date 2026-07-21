@@ -1,6 +1,6 @@
 // ─── State ────────────────────────────────────────────────────────────────────
 let jobId       = null;
-let es          = null;
+let eventSource = null;
 let _fileIdx    = 0;  // for staggered file-item entrance animation
 let _jobRunning = false;  // true while any conversion is in progress
 
@@ -16,11 +16,11 @@ fetch('/api/config').then(r => r.json()).then(d => {
   const btn = document.getElementById('folder-btn');
   if (btn) btn.style.display = 'none';
   // Make path input editable so users can type a container-internal path
-  const inp = document.getElementById('out_dir');
-  if (inp) {
-    inp.removeAttribute('readonly');
-    inp.style.cursor = '';
-    inp.placeholder = 'Default — files saved to audiobook_output/ on your host';
+  const outDirInput = document.getElementById('out_dir');
+  if (outDirInput) {
+    outDirInput.removeAttribute('readonly');
+    outDirInput.style.cursor = '';
+    outDirInput.placeholder = 'Default — files saved to audiobook_output/ on your host';
   }
   // Update hint text
   const hint = document.querySelector('#out_dir')?.closest('.field')?.querySelector('div[style*="margin-top"]');
@@ -33,43 +33,43 @@ fetch('/api/config').then(r => r.json()).then(d => {
 }).catch(() => {});
 
 // ─── File drag & drop ─────────────────────────────────────────────────────────
-const dz  = document.getElementById('drop-zone');
-const inp = document.getElementById('epub-file');
+const dropZone  = document.getElementById('drop-zone');
+const fileInput = document.getElementById('epub-file');
 
-inp.addEventListener('change', e => {
+fileInput.addEventListener('change', e => {
   if (e.target.files.length) showFiles(e.target.files);
 });
 
-dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('drag-over'); });
-dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
-dz.addEventListener('drop', e => {
-  e.preventDefault(); dz.classList.remove('drag-over');
+dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
   const all   = Array.from(e.dataTransfer.files);
   const epubs = all.filter(f => f.name.toLowerCase().endsWith('.epub'));
   if (epubs.length) {
-    inp.files = e.dataTransfer.files;
+    fileInput.files = e.dataTransfer.files;
     showFiles(e.dataTransfer.files);
-    dz.classList.add('drop-flash');
-    dz.addEventListener('animationend', () => dz.classList.remove('drop-flash'), {once:true});
+    dropZone.classList.add('drop-flash');
+    dropZone.addEventListener('animationend', () => dropZone.classList.remove('drop-flash'), {once:true});
   } else {
     toast('Please drop .epub files only');
   }
 });
 
 function showFiles(fileList) {
-  dz.classList.add('has-file');
+  dropZone.classList.add('has-file');
   const n = document.getElementById('up-name');
   if (fileList.length === 1) {
     const f = fileList[0];
     n.textContent = f.name + '  (' + fmtBytes(f.size) + ')';
-    dz.querySelector('.up-title').textContent = 'EPUB loaded';
-    dz.querySelector('.up-sub').textContent   = 'Click to replace';
+    dropZone.querySelector('.up-title').textContent = 'EPUB loaded';
+    dropZone.querySelector('.up-sub').textContent   = 'Click to replace';
     fetchChapters(f);
   } else {
     const total = Array.from(fileList).reduce((s, f) => s + f.size, 0);
     n.textContent = fileList.length + ' books selected  (' + fmtBytes(total) + ')';
-    dz.querySelector('.up-title').textContent = fileList.length + ' EPUBs loaded';
-    dz.querySelector('.up-sub').textContent   = 'Click to change selection';
+    dropZone.querySelector('.up-title').textContent = fileList.length + ' EPUBs loaded';
+    dropZone.querySelector('.up-sub').textContent   = 'Click to change selection';
     // Hide chapter card for multi-book batch
     document.getElementById('chapter-card').style.display = 'none';
     _chaptersData = [];
@@ -275,12 +275,12 @@ function onFormatChange() {
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 async function startJob() {
-  if (!inp.files || inp.files.length === 0) {
+  if (!fileInput.files || fileInput.files.length === 0) {
     toast('Please select at least one EPUB file'); return;
   }
 
   const fd = new FormData();
-  for (const f of inp.files) { fd.append('files', f); }
+  for (const f of fileInput.files) { fd.append('files', f); }
   fd.append('voice',         document.getElementById('voice').value);
   fd.append('lang_code',     document.getElementById('lang').value);
   fd.append('speed',         document.getElementById('speed').value);
@@ -341,10 +341,10 @@ async function startJob() {
 
 // ─── SSE (single-book) ────────────────────────────────────────────────────────
 function connectSSE(id) {
-  if (es) es.close();
-  es = new EventSource('/api/stream/' + id);
-  es.onmessage = e => { try { handleMsg(JSON.parse(e.data)); } catch(_) {} };
-  es.onerror   = () => { es.close(); addLog('Connection lost.', 'warn'); };
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource('/api/stream/' + id);
+  eventSource.onmessage = e => { try { handleMsg(JSON.parse(e.data)); } catch(_) {} };
+  eventSource.onerror   = () => { eventSource.close(); addLog('Connection lost.', 'warn'); };
 }
 
 function handleMsg(m) {
@@ -363,7 +363,7 @@ function handleMsg(m) {
 }
 
 function onDone(files) {
-  if (es) es.close();
+  if (eventSource) eventSource.close();
   _jobRunning = false;
   setDot('done'); setStatus('Done!');
   setProg(1, 'Conversion complete');

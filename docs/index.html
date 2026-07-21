@@ -40,7 +40,7 @@
     <div class="cmd-row">
       <span class="prompt">$</span>
       <span class="cmd" id="hcmd">docker run -p 7860:7860 rahil18/scrolltone</span>
-      <button class="copy" onclick="cp('hcmd',this)">Copy</button>
+      <button class="copy" onclick="copyText('hcmd',this)">Copy</button>
     </div>
 
     <!-- App mockup -->
@@ -182,7 +182,7 @@
     <div class="install-box">
       <div class="ib-head">
         <span><span class="lang">bash</span></span>
-        <button class="copy-all" onclick="cpBlock('iblock',this)">Copy all</button>
+        <button class="copy-all" onclick="copyBlock('iblock',this)">Copy all</button>
       </div>
       <pre id="iblock"><span class="cm"># Pull the image (~1.5 GB, includes Kokoro model weights)</span>
 <span class="kw">docker pull</span> <span class="vl">rahil18/scrolltone:1.0.1</span>

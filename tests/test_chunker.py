@@ -8,16 +8,16 @@ import re
 def split_chunks(text: str, chunk_size: int) -> list[str]:
     """Inline of the current chunker for isolated testing."""
     sentences = re.split(r"(?<=[.!?])\s+", text)
-    chunks, cur = [], ""
-    for sent in sentences:
-        if len(cur) + len(sent) + 1 <= chunk_size:
-            cur = (cur + " " + sent).strip()
+    chunks, current_chunk = [], ""
+    for sentence in sentences:
+        if len(current_chunk) + len(sentence) + 1 <= chunk_size:
+            current_chunk = (current_chunk + " " + sentence).strip()
         else:
-            if cur:
-                chunks.append(cur)
-            cur = sent
-    if cur:
-        chunks.append(cur)
+            if current_chunk:
+                chunks.append(current_chunk)
+            current_chunk = sentence
+    if current_chunk:
+        chunks.append(current_chunk)
     return chunks
 
 

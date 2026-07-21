@@ -37,7 +37,7 @@ async def list_chapters(
 ):
     """Parse an EPUB and return its chapter list (title + char count)."""
     import tempfile, os
-    from ebooklib import epub as _epub
+    from ebooklib import epub
 
     data     = await file.read()
     tmp_path = None
@@ -45,7 +45,7 @@ async def list_chapters(
         with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp:
             tmp.write(data)
             tmp_path = tmp.name
-        book     = _epub.read_epub(tmp_path)
+        book     = epub.read_epub(tmp_path)
         chapters = extract_chapters(book, min_ch_len)
         return {
             "chapters": [
@@ -63,24 +63,24 @@ async def list_chapters(
 
 @router.post("/convert")
 async def convert(
-    files:          list[UploadFile] = File(...),
-    voice:          str   = Form("af_heart"),
-    lang_code:      str   = Form("a"),
-    speed:          float = Form(1.0),
-    device:         str   = Form("auto"),
-    trf:            str   = Form("false"),
-    merge:          str   = Form("true"),
-    chunk_size:     int   = Form(500),
-    silence:        float = Form(1.0),
-    min_ch_len:     int   = Form(200),
-    output_format:   str   = Form("wav"),
-    bitrate:         int   = Form(192),
-    custom_out_dir:  str   = Form(""),
-    chapter_indices: str   = Form(""),   # comma-separated; empty = all chapters
-    enhance:         str   = Form("false"),  # broadcast-style ffmpeg post-processing
-    multi_voice:     str   = Form("false"),  # LLM speaker attribution
-    ollama_url:      str   = Form("http://localhost:11434"),
-    ollama_model:    str   = Form("phi3:mini"),
+    files:            list[UploadFile] = File(...),
+    voice:            str   = Form("af_heart"),
+    lang_code:        str   = Form("a"),
+    speed:            float = Form(1.0),
+    device:           str   = Form("auto"),
+    trf:              str   = Form("false"),
+    merge:            str   = Form("true"),
+    chunk_size:       int   = Form(500),
+    silence:          float = Form(1.0),
+    min_ch_len:       int   = Form(200),
+    output_format:    str   = Form("wav"),
+    bitrate:          int   = Form(192),
+    custom_out_dir:   str   = Form(""),
+    chapter_indices:  str   = Form(""),   # comma-separated; empty = all chapters
+    enhance:          str   = Form("false"),  # broadcast-style ffmpeg post-processing
+    multi_voice:      str   = Form("false"),  # LLM speaker attribution
+    ollama_url:       str   = Form("http://localhost:11434"),
+    ollama_model:     str   = Form("phi3:mini"),
 ):
     batch_id = str(uuid.uuid4())
     job_ids  = []
@@ -122,8 +122,8 @@ async def convert(
 
         # Derive book title from EPUB metadata for the subfolder name
         try:
-            from ebooklib import epub as _epub
-            book       = _epub.read_epub(str(up_path))
+            from ebooklib import epub
+            book       = epub.read_epub(str(up_path))
             meta_title = get_book_metadata(book).get("title", "").strip()
         except Exception:
             meta_title = ""
