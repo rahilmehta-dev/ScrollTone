@@ -20,7 +20,6 @@ Then open **http://localhost:7860** in your browser.
 
 - 19 Kokoro voices — American & British, male & female
 - Speed control (0.5× – 2.5×) with preset buttons
-- Parallel chapter processing (1–4 workers per book)
 - Batch mode — upload multiple EPUBs, processed sequentially to keep RAM usage predictable
 - Chapter selection — pick specific chapters before converting
 - Per-chapter live progress grid in the UI
@@ -64,22 +63,11 @@ Then in ScrollTone: enable **Multi-voice** in Advanced Settings, set the Ollama 
 
 ## Docker RAM Requirements
 
-Each parallel worker loads a full copy of the Kokoro model (~0.9 GB each). You must allocate enough RAM to Docker Desktop (Settings → Resources → Memory) **before** running the container.
-
-| Parallel Workers | Docker RAM (minimum) | Recommended |
-|-----------------|----------------------|-------------|
-| 1 (default)     | 4 GB                 | 4 GB        |
-| 2               | 6 GB                 | 6 GB        |
-| 3               | 8 GB                 | 10 GB       |
-| **4**           | **18 GB**            | **22 GB**   |
-
-> Go to **Docker Desktop → Settings → Resources → Memory slider → set to 22 GB → Apply & Restart**.
-
-The `docker-compose.yml` sets `mem_limit: 20g` by default. The app also auto-reduces workers at runtime if there isn't enough free RAM and logs the reason.
+ScrollTone loads a single Kokoro model per job (~1.5 GB). Allocate at least **4 GB** to Docker Desktop (Settings → Resources → Memory) before running the container.
 
 Exit code **137** in the container logs always means OOM — increase Docker RAM and restart.
 
-When converting multiple EPUBs, books are processed **sequentially** — each book uses the full worker budget, then releases all pipelines before the next book starts. This keeps peak RAM predictable regardless of batch size.
+When converting multiple EPUBs, books are processed **sequentially** — one book's pipeline is fully released before the next book starts. This keeps peak RAM predictable regardless of batch size.
 
 ---
 
@@ -92,7 +80,6 @@ When converting multiple EPUBs, books are processed **sequentially** — each bo
 | Output Format | WAV | WAV or MP3 (MP3 embeds cover art & metadata) |
 | MP3 Bitrate | 192 kbps | 128 / 192 / 256 / 320 kbps |
 | Merge Chapters | On | Produce a single combined file in addition to per-chapter files |
-| Parallel Workers | `1` | Chapters processed simultaneously per book (1–4) |
 | Device | Auto | CPU, CUDA GPU, or MPS (Apple Silicon) — auto-detected |
 | Transformer G2P | Off | Better pronunciation, much slower, downloads 457 MB extra on first use |
 | Enhance Audio | Off | ffmpeg: compression + 200 Hz warmth + 8 kHz cut. Requires `ffmpeg` on PATH |
@@ -110,8 +97,8 @@ When converting multiple EPUBs, books are processed **sequentially** — each bo
 Edit `docker-compose.yml` to match your Docker RAM allocation:
 
 ```yaml
-mem_limit: 20g      # change this
-memswap_limit: 22g  # keep 2g above mem_limit
+mem_limit: 4g       # change this
+memswap_limit: 6g   # keep 2g above mem_limit
 ```
 
 Then restart:
@@ -166,7 +153,6 @@ Open **http://localhost:7860**
 |-------|--------|
 | First conversion | Kokoro downloads ~330 MB of weights to `~/.cache/huggingface` — one time only |
 | Device setting | Leave on **Auto** — Kokoro uses Metal (MPS) automatically on Apple Silicon |
-| Workers | 1–2 workers recommended on M1/M2; MPS handles inference fast |
 | Voice previews | First click per voice takes ~5–10 s to generate, then instant |
 | MP3 output | Uses the ffmpeg installed in Step 1 — works natively |
 | Multi-voice | Run `ollama serve` in a separate terminal before starting ScrollTone |
@@ -195,3 +181,32 @@ python app.py
 ## Output Files
 
 Audio files are saved to `audiobook_output/BookTitle/` next to the app (or your chosen output folder). Each book gets its own subfolder named after the book title. Files persist across restarts and can be downloaded directly from the browser during or after conversion.
+
+---
+
+## Project Structure
+
+```
+app.py                  Entry point — boots the FastAPI backend and serves frontend/ at "/"
+
+backend/
+├── routes/              HTTP layer — what the browser calls
+│   ├── convert.py         POST /api/convert, /chapters, /stream, /stop, /download
+│   ├── preview.py         GET  /api/preview/{voice}
+│   └── ui.py               /api/config, /pick-folder, /shutdown
+├── pipeline.py           The orchestrator — reads the EPUB, chunks text, drives Kokoro, writes files
+├── epub_parser.py         EPUB chapter/metadata extraction (used by pipeline.py)
+├── attribution.py          Ollama LLM speaker attribution for multi-voice (used by pipeline.py)
+├── voices.py                Voice catalog, VoiceMapper, preview synthesis
+├── audio.py                  WAV/MP3 export, ffmpeg enhancement
+├── state.py                Shared app state (upload/output dirs, job registry)
+└── schemas.py               Pydantic models
+
+frontend/                The web UI (index.html, app.js, style.css), served by app.py
+
+docs/                    Unrelated — the GitHub Pages marketing/landing site, not part of the running app
+
+scripts/                 Dev helpers (generate_previews.py runs at Docker build time)
+```
+
+Reading order to understand a conversion request: `backend/routes/convert.py` → `backend/pipeline.py` (`_worker`, the heart of it) → the leaf modules it calls (`epub_parser.py`, `attribution.py`, `voices.py`, `audio.py`).

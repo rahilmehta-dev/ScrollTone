@@ -12,7 +12,7 @@ import threading
 
 from fastapi import APIRouter
 
-import core.state as state
+import backend.state as state
 
 router = APIRouter()
 

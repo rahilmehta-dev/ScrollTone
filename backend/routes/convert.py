@@ -17,9 +17,9 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
-import core.state as state
-from core.epub.parser import extract_chapters, get_book_metadata
-from core.pipeline.job_runner import _worker
+import backend.state as state
+from backend.epub_parser import extract_chapters, get_book_metadata
+from backend.pipeline import _worker
 
 router = APIRouter()
 
@@ -73,7 +73,6 @@ async def convert(
     chunk_size:     int   = Form(500),
     silence:        float = Form(1.0),
     min_ch_len:     int   = Form(200),
-    num_workers:    int   = Form(1),
     output_format:   str   = Form("wav"),
     bitrate:         int   = Form(192),
     custom_out_dir:  str   = Form(""),
@@ -97,8 +96,6 @@ async def convert(
             resolved_device = "cpu"
     else:
         resolved_device = device
-    # Each book gets the full worker budget; books run sequentially to cap RAM usage
-    eff_workers = min(num_workers, 4)
 
     loop = asyncio.get_running_loop()
     jobs_settings = []   # collected in upload order; processed sequentially below
@@ -171,7 +168,6 @@ async def convert(
             "chunk_size":    chunk_size,
             "silence":       silence,
             "min_ch_len":    min_ch_len,
-            "num_workers":   eff_workers,
             "output_format":   output_format.lower(),
             "bitrate":         bitrate,
             "chapter_indices": (

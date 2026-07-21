@@ -1,1 +1,8 @@
 /.idea
+__pycache__/
+*.pyc
+.DS_Store
+/.vtcode
+/vtcode.toml
+.DS_Store
+/__pycache__

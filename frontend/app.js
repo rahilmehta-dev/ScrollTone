@@ -290,7 +290,6 @@ async function startJob() {
   fd.append('chunk_size',    document.getElementById('chunk_size').value);
   fd.append('silence',       document.getElementById('silence').value);
   fd.append('min_ch_len',    document.getElementById('min_ch_len').value);
-  fd.append('num_workers',   document.getElementById('num_workers').value);
   fd.append('output_format',   document.querySelector('input[name="output_format"]:checked').value);
   fd.append('bitrate',         document.getElementById('bitrate').value);
   fd.append('custom_out_dir',  document.getElementById('out_dir').value.trim());

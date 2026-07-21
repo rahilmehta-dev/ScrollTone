@@ -10,8 +10,8 @@ import asyncio
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-import core.state as state
-from core.tts.kokoro import KNOWN_VOICES, _generate_preview
+import backend.state as state
+from backend.voices import KNOWN_VOICES, _generate_preview
 
 router = APIRouter()
 

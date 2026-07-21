@@ -3,7 +3,6 @@ Smoke tests for the text chunker logic.
 Run with: pytest tests/
 """
 import re
-import pytest
 
 
 def split_chunks(text: str, chunk_size: int) -> list[str]:

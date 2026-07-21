@@ -246,15 +246,6 @@
             </select>
           </div>
           <div class="field">
-            <label>Parallel Workers <i class="tip" data-tip="Each worker converts one chapter at the same time. More workers = faster — but each loads a full model copy (~0.9 GB). 1 worker: safe on any machine. 2 workers: ~1.8× faster, needs ~3 GB free RAM. 4 workers: ~3× faster, needs ~22–25 GB RAM. Exit code 137 = out of memory — reduce workers.">ⓘ</i></label>
-            <select id="num_workers">
-              <option value="1" selected>1 — Sequential (~1.5 GB RAM)</option>
-              <option value="2">2 — ~1.8× faster (~3 GB RAM)</option>
-              <option value="3">3 — ~2.5× faster (~4.5 GB RAM)</option>
-              <option value="4">4 — ~3.2× faster (~6 GB RAM)</option>
-            </select>
-          </div>
-          <div class="field">
             <label>Max Chunk (chars) <i class="tip" data-tip="Long text is split into chunks before being sent to the TTS model. Smaller chunks = more natural sentence breaks. 500 is a good default; reduce to 300 if you hear awkward cuts.">ⓘ</i></label>
             <input type="number" id="chunk_size" value="500" min="100" max="2000">
           </div>

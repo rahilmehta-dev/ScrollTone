@@ -32,8 +32,8 @@ del p"
 
 # ── Copy application ──────────────────────────────────────────────────────────
 COPY app.py .
-COPY core/ core/
-COPY api/ api/
+COPY backend/ backend/
+COPY frontend/ frontend/
 COPY scripts/ scripts/
 
 # Pre-generate voice preview samples for all 20 voices (~10 MB, instant playback in UI)
