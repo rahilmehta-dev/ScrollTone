@@ -23,7 +23,7 @@ from backend.attribution import attribute_speakers
 SAMPLE_RATE = 24000   # Kokoro output sample rate
 
 
-def convert_book(job: dict, s: dict, loop: asyncio.AbstractEventLoop) -> None:
+def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoop) -> None:
     """Run a full conversion job.
 
     Pushed messages are JSON strings compatible with the SSE stream format:
@@ -34,12 +34,12 @@ def convert_book(job: dict, s: dict, loop: asyncio.AbstractEventLoop) -> None:
 
     # ── Push helpers ──────────────────────────────────────────────────────────
     def _push(data: dict):
-        loop.call_soon_threadsafe(job["queue"].put_nowait, json.dumps(data))
+        loop.call_soon_threadsafe(job_state["queue"].put_nowait, json.dumps(data))
 
-    def log(msg: str):    _push({"type": "log",      "msg": msg})
-    def status(msg: str): _push({"type": "status",   "msg": msg})
-    def prog(v, lbl=""):  _push({"type": "progress", "value": v, "label": lbl})
-    def done():           loop.call_soon_threadsafe(job["queue"].put_nowait, None)
+    def log(msg: str):            _push({"type": "log",      "msg": msg})
+    def status(msg: str):         _push({"type": "status",   "msg": msg})
+    def prog(value, label=""):    _push({"type": "progress", "value": value, "label": label})
+    def done():                   loop.call_soon_threadsafe(job_state["queue"].put_nowait, None)
 
     try:
         import psutil
@@ -47,15 +47,15 @@ def convert_book(job: dict, s: dict, loop: asyncio.AbstractEventLoop) -> None:
         from ebooklib import epub
         import numpy as np
 
-        _proc = psutil.Process(os.getpid())
+        current_process = psutil.Process(os.getpid())
 
         def memlog(label: str = ""):
-            rss   = _proc.memory_info().rss / 1024**3
-            vm    = psutil.virtual_memory()
-            msg   = (f"[MEM] {label}  "
-                     f"process={rss:.2f}GB  "
-                     f"system={vm.used/1024**3:.2f}/{vm.total/1024**3:.2f}GB  "
-                     f"avail={vm.available/1024**3:.2f}GB")
+            rss_gb    = current_process.memory_info().rss / 1024**3
+            mem_stats = psutil.virtual_memory()
+            msg       = (f"[MEM] {label}  "
+                         f"process={rss_gb:.2f}GB  "
+                         f"system={mem_stats.used/1024**3:.2f}/{mem_stats.total/1024**3:.2f}GB  "
+                         f"avail={mem_stats.available/1024**3:.2f}GB")
             log(msg)
             print(msg, flush=True)
 
@@ -63,291 +63,292 @@ def convert_book(job: dict, s: dict, loop: asyncio.AbstractEventLoop) -> None:
 
         # Load the pipeline for this job
         status("Loading pipeline…")
-        log(f"Initializing pipeline  lang={s['lang_code']}  trf={s['trf']}")
-        pipeline = KPipeline(lang_code=s["lang_code"],
+        log(f"Initializing pipeline  lang={settings['lang_code']}  trf={settings['trf']}")
+        pipeline = KPipeline(lang_code=settings["lang_code"],
                               repo_id="hexgrad/Kokoro-82M",
-                              trf=s["trf"], device=s["device"])
+                              trf=settings["trf"], device=settings["device"])
         memlog("after pipeline loaded")
-        log(f"Model ready  |  voice={s['voice']}  speed={s['speed']:.2f}×\n")
+        log(f"Model ready  |  voice={settings['voice']}  speed={settings['speed']:.2f}×\n")
 
         # Read and parse EPUB
         status("Reading EPUB…")
-        log(f"Reading: {s['filename']}")
-        book = epub.read_epub(s["epub"])
+        log(f"Reading: {settings['filename']}")
+        book = epub.read_epub(settings["epub"])
 
         metadata = get_book_metadata(book)
-        s["book_title_meta"]  = metadata["title"]
-        s["book_author_meta"] = metadata["author"]
-        s["cover_data"], s["cover_mime"] = _find_epub_cover(book)
-        if s["cover_data"]:
-            log(f"Cover image found ({len(s['cover_data']) // 1024} KB, {s['cover_mime']})")
+        settings["book_title_meta"]  = metadata["title"]
+        settings["book_author_meta"] = metadata["author"]
+        settings["cover_data"], settings["cover_mime"] = _find_epub_cover(book)
+        if settings["cover_data"]:
+            log(f"Cover image found ({len(settings['cover_data']) // 1024} KB, {settings['cover_mime']})")
         else:
             log("No cover image found in EPUB")
 
-        chapters = extract_chapters(book, s["min_ch_len"])
+        chapters = extract_chapters(book, settings["min_ch_len"])
 
-        sel = s.get("chapter_indices")
-        if sel is not None:
-            sel_set  = set(sel)
-            chapters = [ch for i, ch in enumerate(chapters) if i in sel_set]
+        selected_indices = settings.get("chapter_indices")
+        if selected_indices is not None:
+            selected_indices_set = set(selected_indices)
+            chapters = [chapter for index, chapter in enumerate(chapters) if index in selected_indices_set]
 
         if not chapters:
             log("No chapters found in EPUB.")
-            job["status"] = "error"
+            job_state["status"] = "error"
             done(); return
 
         log(f"Found {len(chapters)} chapters\n")
         # Seed the chapter progress grid in the UI
         _push({"type": "ch_info",
-               "chapters": [{"i": i, "title": t} for i, (t, _) in enumerate(chapters)]})
+               "chapters": [{"i": index, "title": chapter_title}
+                            for index, (chapter_title, _) in enumerate(chapters)]})
 
-        book_stem   = re.sub(r"[^\w\s-]", "", Path(s["filename"]).stem)[:50]
-        silence_arr = np.zeros(int(SAMPLE_RATE * s["silence"]), dtype=np.float32)
+        book_stem     = re.sub(r"[^\w\s-]", "", Path(settings["filename"]).stem)[:50]
+        silence_array = np.zeros(int(SAMPLE_RATE * settings["silence"]), dtype=np.float32)
 
         done_count = 0
 
         # ── Voice mapper (shared across all chapters for consistency) ─────────
-        voice_mapper = VoiceMapper(s["voice"]) if s.get("multi_voice") else None
+        voice_mapper = VoiceMapper(settings["voice"]) if settings.get("multi_voice") else None
         if voice_mapper:
-            log(f"Multi-voice enabled  |  narrator={s['voice']}  "
-                f"model={s['ollama_model']}  url={s['ollama_url']}\n")
+            log(f"Multi-voice enabled  |  narrator={settings['voice']}  "
+                f"model={settings['ollama_model']}  url={settings['ollama_url']}\n")
 
         def _split_chunks(text: str) -> list[str]:
             sentences = re.split(r"(?<=[.!?])\s+", text)
-            chunks, cur = [], ""
-            for sent in sentences:
-                if len(cur) + len(sent) + 1 <= s["chunk_size"]:
-                    cur = (cur + " " + sent).strip()
+            chunks, current_chunk = [], ""
+            for sentence in sentences:
+                if len(current_chunk) + len(sentence) + 1 <= settings["chunk_size"]:
+                    current_chunk = (current_chunk + " " + sentence).strip()
                 else:
-                    if cur: chunks.append(cur)
-                    cur = sent
-            if cur: chunks.append(cur)
+                    if current_chunk: chunks.append(current_chunk)
+                    current_chunk = sentence
+            if current_chunk: chunks.append(current_chunk)
             return chunks
 
         # ── Per-chapter synthesis ───────────────────────────────────────────────
-        def process_chapter(ch_i, title, text):
+        def process_chapter(chapter_index, title, text):
             nonlocal done_count
-            if job["stop_event"].is_set():
+            if job_state["stop_event"].is_set():
                 raise StopIteration
 
-            ch_num = ch_i + 1
-            n      = len(chapters)
-            log(f"── Chapter {ch_num}/{n}: {title}")
+            chapter_number = chapter_index + 1
+            total_chapters = len(chapters)
+            log(f"── Chapter {chapter_number}/{total_chapters}: {title}")
             log(f"   {len(text):,} chars")
 
-            ch_audio = []
+            chapter_audio = []
 
             # ── Chapter title announcement ────────────────────────────────
             # Prepend: 0.5 s silence → spoken title → 0.75 s silence
             try:
                 title_frames = []
-                for _, _, audio in pipeline(title, voice=s["voice"], speed=s["speed"]):
+                for _, _, audio in pipeline(title, voice=settings["voice"], speed=settings["speed"]):
                     title_frames.append(audio)
                 if title_frames:
-                    ch_audio.append(np.zeros(int(SAMPLE_RATE * 0.5), dtype=np.float32))
-                    ch_audio.extend(title_frames)
-                    ch_audio.append(np.zeros(int(SAMPLE_RATE * 0.75), dtype=np.float32))
-            except Exception as _te:
-                log(f"   ! Title announcement skipped: {_te}")
+                    chapter_audio.append(np.zeros(int(SAMPLE_RATE * 0.5), dtype=np.float32))
+                    chapter_audio.extend(title_frames)
+                    chapter_audio.append(np.zeros(int(SAMPLE_RATE * 0.75), dtype=np.float32))
+            except Exception as title_error:
+                log(f"   ! Title announcement skipped: {title_error}")
 
             if voice_mapper:
                 # ── Multi-voice path ──────────────────────────────────────
                 # One LLM call per chapter to attribute all dialogue
-                log(f"   [Ollama] → {s['ollama_model']}  "
-                    f"({len(text):,} chars, {s['ollama_url']})")
+                log(f"   [Ollama] → {settings['ollama_model']}  "
+                    f"({len(text):,} chars, {settings['ollama_url']})")
                 try:
                     segments = attribute_speakers(
-                        text, s["ollama_url"], s["ollama_model"]
+                        text, settings["ollama_url"], settings["ollama_model"]
                     )
-                    dialogue = [sg for sg in segments if sg["type"] == "dialogue"]
-                    narration = [sg for sg in segments if sg["type"] == "narration"]
+                    dialogue = [segment for segment in segments if segment["type"] == "dialogue"]
+                    narration = [segment for segment in segments if segment["type"] == "narration"]
                     log(f"   [Ollama] ← {len(segments)} segments  "
                         f"({len(dialogue)} dialogue, {len(narration)} narration)")
                     # Log each new character assignment
-                    for seg in dialogue:
-                        spk = seg.get("speaker")
-                        gen = seg.get("gender") or "?"
-                        if spk:
-                            voice = voice_mapper.get_voice(spk, seg.get("gender"))
-                            preview = seg["text"][:60].replace("\n", " ")
-                            log(f"   [Ollama]   {spk} ({gen}) → {voice}  \"{preview}…\"")
+                    for segment in dialogue:
+                        speaker = segment.get("speaker")
+                        gender  = segment.get("gender") or "?"
+                        if speaker:
+                            voice = voice_mapper.get_voice(speaker, segment.get("gender"))
+                            preview = segment["text"][:60].replace("\n", " ")
+                            log(f"   [Ollama]   {speaker} ({gender}) → {voice}  \"{preview}…\"")
                     log(f"   Characters so far: {voice_mapper.summary()}")
-                except Exception as e:
-                    log(f"   [Ollama] ! Attribution failed: {e}")
-                    log(f"   [Ollama] ! Falling back to single voice ({s['voice']})")
+                except Exception as error:
+                    log(f"   [Ollama] ! Attribution failed: {error}")
+                    log(f"   [Ollama] ! Falling back to single voice ({settings['voice']})")
                     segments = [{"type": "narration", "text": text,
                                  "speaker": None, "gender": None}]
 
                 # Flatten segments → sub-chunks with per-chunk voice
                 voice_chunks = []
-                for seg in segments:
-                    seg_text = seg.get("text", "").strip()
-                    if not seg_text:
+                for segment in segments:
+                    segment_text = segment.get("text", "").strip()
+                    if not segment_text:
                         continue
-                    voice = voice_mapper.get_voice(seg.get("speaker"), seg.get("gender"))
-                    for sub in _split_chunks(seg_text):
-                        voice_chunks.append((voice, sub))
+                    voice = voice_mapper.get_voice(segment.get("speaker"), segment.get("gender"))
+                    for sub_chunk in _split_chunks(segment_text):
+                        voice_chunks.append((voice, sub_chunk))
 
-                n_chunks      = len(voice_chunks)
-                prog_interval = max(1, n_chunks // 20)
-                _push({"type": "ch_start", "ch_i": ch_i, "chunks": n_chunks})
+                total_chunks      = len(voice_chunks)
+                progress_interval = max(1, total_chunks // 20)
+                _push({"type": "ch_start", "ch_i": chapter_index, "chunks": total_chunks})
 
-                for c_i, (voice, chunk) in enumerate(voice_chunks):
-                    if job["stop_event"].is_set():
+                for chunk_index, (voice, chunk) in enumerate(voice_chunks):
+                    if job_state["stop_event"].is_set():
                         raise StopIteration
                     try:
-                        for _, _, audio in pipeline(chunk, voice=voice, speed=s["speed"]):
-                            ch_audio.append(audio)
+                        for _, _, audio in pipeline(chunk, voice=voice, speed=settings["speed"]):
+                            chapter_audio.append(audio)
                     except StopIteration:
                         raise
-                    except Exception as e:
-                        log(f"   ! Ch{ch_num} chunk {c_i + 1} skipped: {e}")
-                    if (c_i + 1) % prog_interval == 0 or c_i == n_chunks - 1:
-                        _push({"type": "ch_prog", "ch_i": ch_i,
-                               "pct": round((c_i + 1) / n_chunks, 3)})
+                    except Exception as error:
+                        log(f"   ! Ch{chapter_number} chunk {chunk_index + 1} skipped: {error}")
+                    if (chunk_index + 1) % progress_interval == 0 or chunk_index == total_chunks - 1:
+                        _push({"type": "ch_prog", "ch_i": chapter_index,
+                               "pct": round((chunk_index + 1) / total_chunks, 3)})
 
             else:
                 # ── Single-voice path (original) ──────────────────────────
-                chunks        = _split_chunks(text)
-                n_chunks      = len(chunks)
-                prog_interval = max(1, n_chunks // 20)
-                log(f"   {n_chunks} chunks")
-                _push({"type": "ch_start", "ch_i": ch_i, "chunks": n_chunks})
+                chunks             = _split_chunks(text)
+                total_chunks       = len(chunks)
+                progress_interval  = max(1, total_chunks // 20)
+                log(f"   {total_chunks} chunks")
+                _push({"type": "ch_start", "ch_i": chapter_index, "chunks": total_chunks})
 
-                for c_i, chunk in enumerate(chunks):
-                    if job["stop_event"].is_set():
+                for chunk_index, chunk in enumerate(chunks):
+                    if job_state["stop_event"].is_set():
                         raise StopIteration
                     try:
-                        for _, _, audio in pipeline(chunk, voice=s["voice"], speed=s["speed"]):
-                            ch_audio.append(audio)
+                        for _, _, audio in pipeline(chunk, voice=settings["voice"], speed=settings["speed"]):
+                            chapter_audio.append(audio)
                     except StopIteration:
                         raise
-                    except Exception as e:
-                        log(f"   ! Ch{ch_num} chunk {c_i + 1} skipped: {e}")
-                    if (c_i + 1) % prog_interval == 0 or c_i == n_chunks - 1:
-                        _push({"type": "ch_prog", "ch_i": ch_i,
-                               "pct": round((c_i + 1) / n_chunks, 3)})
+                    except Exception as error:
+                        log(f"   ! Ch{chapter_number} chunk {chunk_index + 1} skipped: {error}")
+                    if (chunk_index + 1) % progress_interval == 0 or chunk_index == total_chunks - 1:
+                        _push({"type": "ch_prog", "ch_i": chapter_index,
+                               "pct": round((chunk_index + 1) / total_chunks, 3)})
 
-            if not ch_audio:
+            if not chapter_audio:
                 log(f"   (no audio generated)\n")
-                _push({"type": "ch_skip", "ch_i": ch_i})
-                return (ch_i, None, None, 0.0)
+                _push({"type": "ch_skip", "ch_i": chapter_index})
+                return (chapter_index, None, None, 0.0)
 
-            combined   = np.concatenate(ch_audio)
-            safe_title = re.sub(r"[^\w\s-]", "", title)[:35].strip()
-            fname_wav  = f"{book_stem}_{safe_title}.wav"
-            out_wav    = os.path.join(s["out_dir"], fname_wav)
-            write_wav(out_wav, combined, SAMPLE_RATE)
+            combined_audio = np.concatenate(chapter_audio)
+            safe_title     = re.sub(r"[^\w\s-]", "", title)[:35].strip()
+            wav_filename   = f"{book_stem}_{safe_title}.wav"
+            wav_path       = os.path.join(settings["out_dir"], wav_filename)
+            write_wav(wav_path, combined_audio, SAMPLE_RATE)
 
-            if s.get("enhance"):
+            if settings.get("enhance"):
                 try:
-                    enhance_wav(out_wav)
-                except Exception as e:
-                    log(f"   ! Enhancement skipped (Ch{ch_num}): {e}")
+                    enhance_wav(wav_path)
+                except Exception as error:
+                    log(f"   ! Enhancement skipped (Ch{chapter_number}): {error}")
 
-            if s.get("output_format") == "mp3":
-                fname = f"{book_stem}_{safe_title}.mp3"
-                to_mp3(out_wav, os.path.join(s["out_dir"], fname),
-                       s["bitrate"],
+            if settings.get("output_format") == "mp3":
+                filename = f"{book_stem}_{safe_title}.mp3"
+                to_mp3(wav_path, os.path.join(settings["out_dir"], filename),
+                       settings["bitrate"],
                        title=title,
-                       album=s.get("book_title_meta") or book_stem,
-                       artist=s.get("book_author_meta", ""),
-                       track=ch_num,
-                       cover_data=s.get("cover_data"),
-                       cover_mime=s.get("cover_mime", "image/jpeg"))
-                os.remove(out_wav)
+                       album=settings.get("book_title_meta") or book_stem,
+                       artist=settings.get("book_author_meta", ""),
+                       track=chapter_number,
+                       cover_data=settings.get("cover_data"),
+                       cover_mime=settings.get("cover_mime", "image/jpeg"))
+                os.remove(wav_path)
             else:
-                fname = fname_wav
+                filename = wav_filename
 
-            dur = len(combined) / SAMPLE_RATE
-            log(f"   Saved: {fname}  ({dur:.1f}s)\n")
+            duration = len(combined_audio) / SAMPLE_RATE
+            log(f"   Saved: {filename}  ({duration:.1f}s)\n")
 
             done_count += 1
-            prog(done_count / n, f"{done_count}/{n} chapters done")
+            prog(done_count / total_chapters, f"{done_count}/{total_chapters} chapters done")
 
-            _push({"type": "file", "filename": fname,
-                   "duration": dur, "chapter": ch_num, "title": title})
-            return (ch_i, fname, combined, dur)
+            _push({"type": "file", "filename": filename,
+                   "duration": duration, "chapter": chapter_number, "title": title})
+            return (chapter_index, filename, combined_audio, duration)
 
         # ── Execution — one chapter at a time, in order ─────────────────────────
         results: dict = {}
         status(f"Processing {len(chapters)} chapter(s)…")
-        for ch_i, (title, text) in enumerate(chapters):
-            if job["stop_event"].is_set():
+        for chapter_index, (title, text) in enumerate(chapters):
+            if job_state["stop_event"].is_set():
                 break
             try:
-                r = process_chapter(ch_i, title, text)
-                results[r[0]] = r
+                result = process_chapter(chapter_index, title, text)
+                results[result[0]] = result
             except StopIteration:
-                job["status"] = "cancelled"
+                job_state["status"] = "cancelled"
                 log("\nStopped by user.")
                 done(); return
-            except Exception as exc:
-                log(f"\nChapter {ch_i + 1} ({title[:40]}) failed: {exc}")
+            except Exception as error:
+                log(f"\nChapter {chapter_index + 1} ({title[:40]}) failed: {error}")
 
-        if job["stop_event"].is_set():
+        if job_state["stop_event"].is_set():
             log("\nStopped by user.")
-            job["status"] = "cancelled"
+            job_state["status"] = "cancelled"
             done(); return
 
         memlog("all chapters complete")
 
         # Collect results in chapter order, build merge list
         all_audio = []
-        for ch_i in sorted(results.keys()):
-            _, fname, audio, _ = results[ch_i]
-            if fname:
-                job["files"].append(fname)
-            if s["merge"] and audio is not None:
+        for chapter_index in sorted(results.keys()):
+            _, filename, audio, _ = results[chapter_index]
+            if filename:
+                job_state["files"].append(filename)
+            if settings["merge"] and audio is not None:
                 all_audio.append(audio)
-                if ch_i < len(chapters) - 1:
-                    all_audio.append(silence_arr)
+                if chapter_index < len(chapters) - 1:
+                    all_audio.append(silence_array)
 
         # ── Merge all chapters into a single file ─────────────────────────────
-        if s["merge"] and all_audio and not job["stop_event"].is_set():
+        if settings["merge"] and all_audio and not job_state["stop_event"].is_set():
             status("Merging chapters…")
             log(f"Merging {len(chapters)} chapters…")
-            full      = np.concatenate(all_audio)
-            fname_wav = f"{book_stem}_FULL.wav"
-            out_wav   = os.path.join(s["out_dir"], fname_wav)
-            write_wav(out_wav, full, SAMPLE_RATE)
+            full_audio   = np.concatenate(all_audio)
+            wav_filename = f"{book_stem}_FULL.wav"
+            wav_path     = os.path.join(settings["out_dir"], wav_filename)
+            write_wav(wav_path, full_audio, SAMPLE_RATE)
 
-            if s.get("enhance"):
+            if settings.get("enhance"):
                 try:
-                    enhance_wav(out_wav)
-                except Exception as e:
-                    log(f"! Enhancement skipped (FULL): {e}")
+                    enhance_wav(wav_path)
+                except Exception as error:
+                    log(f"! Enhancement skipped (FULL): {error}")
 
-            if s.get("output_format") == "mp3":
-                fname = f"{book_stem}_FULL.mp3"
-                to_mp3(out_wav, os.path.join(s["out_dir"], fname),
-                       s["bitrate"],
+            if settings.get("output_format") == "mp3":
+                filename = f"{book_stem}_FULL.mp3"
+                to_mp3(wav_path, os.path.join(settings["out_dir"], filename),
+                       settings["bitrate"],
                        title="Full Audiobook",
-                       album=s.get("book_title_meta") or book_stem,
-                       artist=s.get("book_author_meta", ""),
-                       cover_data=s.get("cover_data"),
-                       cover_mime=s.get("cover_mime", "image/jpeg"))
-                os.remove(out_wav)
+                       album=settings.get("book_title_meta") or book_stem,
+                       artist=settings.get("book_author_meta", ""),
+                       cover_data=settings.get("cover_data"),
+                       cover_mime=settings.get("cover_mime", "image/jpeg"))
+                os.remove(wav_path)
             else:
-                fname = fname_wav
+                filename = wav_filename
 
-            mins = len(full) / SAMPLE_RATE / 60
-            log(f"Full audiobook saved — {mins:.1f} min")
-            job["files"].append(fname)
+            minutes = len(full_audio) / SAMPLE_RATE / 60
+            log(f"Full audiobook saved — {minutes:.1f} min")
+            job_state["files"].append(filename)
             _push({
-                "type": "file", "filename": fname,
-                "duration": len(full) / SAMPLE_RATE, "chapter": 0,
+                "type": "file", "filename": filename,
+                "duration": len(full_audio) / SAMPLE_RATE, "chapter": 0,
                 "title": "Full Audiobook (Merged)",
             })
 
         memlog("done")
-        log(f"\nDone! {len(job['files'])} file(s) created.")
-        job["status"] = "done"
+        log(f"\nDone! {len(job_state['files'])} file(s) created.")
+        job_state["status"] = "done"
         done()
 
-    except Exception as exc:
+    except Exception as error:
         import traceback
-        log(f"\nError: {exc}")
+        log(f"\nError: {error}")
         log(traceback.format_exc())
-        job["status"] = "error"
+        job_state["status"] = "error"
         done()

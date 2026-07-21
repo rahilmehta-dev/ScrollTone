@@ -49,12 +49,12 @@ async def list_chapters(
         chapters = extract_chapters(book, min_ch_len)
         return {
             "chapters": [
-                {"index": i, "title": title, "chars": len(text)}
-                for i, (title, text) in enumerate(chapters)
+                {"index": index, "title": title, "chars": len(text)}
+                for index, (title, text) in enumerate(chapters)
             ]
         }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
     finally:
         if tmp_path:
             try: os.unlink(tmp_path)
@@ -98,7 +98,7 @@ async def convert(
         resolved_device = device
 
     loop = asyncio.get_running_loop()
-    jobs_settings = []   # collected in upload order; processed sequentially below
+    job_and_settings_pairs = []   # collected in upload order; processed sequentially below
 
     for file in files:
         job_id = str(uuid.uuid4())
@@ -111,12 +111,12 @@ async def convert(
 
         # If user uploaded a .zip containing an .epub, extract it automatically
         if up_path.suffix.lower() != ".epub" and zipfile.is_zipfile(up_path):
-            with zipfile.ZipFile(up_path) as zf:
-                epub_entries = [n for n in zf.namelist() if n.lower().endswith(".epub")]
+            with zipfile.ZipFile(up_path) as zip_file:
+                epub_entries = [name for name in zip_file.namelist() if name.lower().endswith(".epub")]
             if epub_entries:
                 inner_name = Path(epub_entries[0]).name
-                with zipfile.ZipFile(up_path) as zf:
-                    (up_dir / inner_name).write_bytes(zf.read(epub_entries[0]))
+                with zipfile.ZipFile(up_path) as zip_file:
+                    (up_dir / inner_name).write_bytes(zip_file.read(epub_entries[0]))
                 up_path.unlink()
                 up_path = up_dir / inner_name
 
@@ -143,7 +143,7 @@ async def convert(
         async_queue = asyncio.Queue()
         stop_event  = threading.Event()
 
-        job = {
+        job_state = {
             "id":         job_id,
             "batch_id":   batch_id,
             "book_title": meta_title or Path(file.filename).stem,
@@ -153,7 +153,7 @@ async def convert(
             "out_dir":    str(out_dir),
             "files":      [],
         }
-        state.jobs[job_id] = job
+        state.jobs[job_id] = job_state
 
         settings = {
             "epub":          str(up_path),
@@ -171,7 +171,7 @@ async def convert(
             "output_format":   output_format.lower(),
             "bitrate":         bitrate,
             "chapter_indices": (
-                [int(x) for x in chapter_indices.split(",") if x.strip()]
+                [int(index_str) for index_str in chapter_indices.split(",") if index_str.strip()]
                 if chapter_indices.strip() else None
             ),
             "enhance":      enhance.lower() == "true",
@@ -180,17 +180,17 @@ async def convert(
             "ollama_model": ollama_model.strip() or "phi3:mini",
         }
 
-        jobs_settings.append((job, settings))
+        job_and_settings_pairs.append((job_state, settings))
         job_ids.append(job_id)
-        titles.append(job["book_title"])
+        titles.append(job_state["book_title"])
 
     # Run all books one after another in a background thread — one book's
     # pipeline is fully unloaded before the next book loads, keeping peak RAM
     # predictable. The thread keeps this blocking work off the event loop.
     def _convert_all_books():
-        for job, s in jobs_settings:
-            job["status"] = "running"
-            convert_book(job, s, loop)
+        for job_state, settings in job_and_settings_pairs:
+            job_state["status"] = "running"
+            convert_book(job_state, settings, loop)
 
     threading.Thread(target=_convert_all_books, daemon=True).start()
 
@@ -199,20 +199,20 @@ async def convert(
 
 @router.get("/stream/{job_id}")
 async def stream(job_id: str):
-    job = state.jobs.get(job_id)
-    if not job:
+    job_state = state.jobs.get(job_id)
+    if not job_state:
         raise HTTPException(404, "Job not found")
 
     async def generator():
-        q: asyncio.Queue = job["queue"]
+        queue: asyncio.Queue = job_state["queue"]
         try:
             while True:
                 try:
-                    msg = await asyncio.wait_for(q.get(), timeout=30)
+                    msg = await asyncio.wait_for(queue.get(), timeout=30)
                     if msg is None:
                         yield (
                             "data: "
-                            + json.dumps({"type": "done", "files": job["files"]})
+                            + json.dumps({"type": "done", "files": job_state["files"]})
                             + "\n\n"
                         )
                         return
@@ -231,19 +231,19 @@ async def stream(job_id: str):
 
 @router.post("/stop/{job_id}")
 async def stop_job(job_id: str):
-    job = state.jobs.get(job_id)
-    if not job:
+    job_state = state.jobs.get(job_id)
+    if not job_state:
         raise HTTPException(404, "Job not found")
-    job["stop_event"].set()
+    job_state["stop_event"].set()
     return {"status": "stopping"}
 
 
 @router.get("/download/{job_id}/{filename}")
 async def download(job_id: str, filename: str):
-    job = state.jobs.get(job_id)
-    if not job:
+    job_state = state.jobs.get(job_id)
+    if not job_state:
         raise HTTPException(404, "Job not found")
-    path = Path(job["out_dir"]) / filename
+    path = Path(job_state["out_dir"]) / filename
     if not path.exists():
         raise HTTPException(404, "File not found")
     media_type = "audio/mpeg" if filename.endswith(".mp3") else "audio/wav"
