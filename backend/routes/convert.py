@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 import backend.state as state
 from backend.epub_parser import extract_chapters, get_book_metadata
-from backend.pipeline import _worker
+from backend.pipeline import convert_book
 
 router = APIRouter()
 
@@ -184,14 +184,15 @@ async def convert(
         job_ids.append(job_id)
         titles.append(job["book_title"])
 
-    # Run all books sequentially in one daemon thread — one book's pipelines are
-    # fully unloaded before the next book loads, keeping peak RAM predictable.
-    def _run_sequential():
+    # Run all books one after another in a background thread — one book's
+    # pipeline is fully unloaded before the next book loads, keeping peak RAM
+    # predictable. The thread keeps this blocking work off the event loop.
+    def _convert_all_books():
         for job, s in jobs_settings:
             job["status"] = "running"
-            _worker(job, s, loop)
+            convert_book(job, s, loop)
 
-    threading.Thread(target=_run_sequential, daemon=True).start()
+    threading.Thread(target=_convert_all_books, daemon=True).start()
 
     return {"batch_id": batch_id, "job_ids": job_ids, "titles": titles}
 

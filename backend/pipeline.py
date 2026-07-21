@@ -2,8 +2,9 @@
 Conversion job execution.
 
 Responsibilities:
-- _worker()          : full EPUB-to-audio pipeline run in a daemon thread
-- process_chapter()  : per-chapter synthesis (nested closure inside _worker)
+- convert_book()     : full EPUB-to-audio pipeline for one book, run in a
+                        background thread so it doesn't block the event loop
+- process_chapter()  : per-chapter synthesis (nested closure inside convert_book)
 
 Chapters are processed one at a time, in order, on a single Kokoro pipeline.
 """
@@ -22,7 +23,7 @@ from backend.attribution import attribute_speakers
 SAMPLE_RATE = 24000   # Kokoro output sample rate
 
 
-def _worker(job: dict, s: dict, loop: asyncio.AbstractEventLoop) -> None:
+def convert_book(job: dict, s: dict, loop: asyncio.AbstractEventLoop) -> None:
     """Run a full conversion job.
 
     Pushed messages are JSON strings compatible with the SSE stream format:

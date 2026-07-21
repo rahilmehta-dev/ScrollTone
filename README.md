@@ -209,4 +209,4 @@ docs/                    Unrelated — the GitHub Pages marketing/landing site, 
 scripts/                 Dev helpers (generate_previews.py runs at Docker build time)
 ```
 
-Reading order to understand a conversion request: `backend/routes/convert.py` → `backend/pipeline.py` (`_worker`, the heart of it) → the leaf modules it calls (`epub_parser.py`, `attribution.py`, `voices.py`, `audio.py`).
+Reading order to understand a conversion request: `backend/routes/convert.py` → `backend/pipeline.py` (`convert_book`, the heart of it) → the leaf modules it calls (`epub_parser.py`, `attribution.py`, `voices.py`, `audio.py`).

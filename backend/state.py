@@ -6,7 +6,7 @@ import os
 import threading
 from pathlib import Path
 
-BASE_DIR    = Path(__file__).parent.parent          # TTS/
+BASE_DIR    = Path(__file__).parent.parent          # repo root
 UPLOAD_DIR  = Path("/tmp/tts_uploads")
 OUTPUT_DIR  = Path("/tmp/tts_outputs")
 PREVIEW_DIR = Path(os.environ.get("PREVIEW_DIR", str(BASE_DIR / "previews")))
