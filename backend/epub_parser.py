@@ -89,6 +89,11 @@ def _build_toc_map(toc_items) -> dict:
 def extract_chapters(book, min_len: int) -> list:
     """Return list of (title, text) tuples for chapters meeting the min length.
 
+    Walks book.spine (the EPUB's actual reading order) rather than
+    book.get_items() (manifest order, which frequently differs — e.g. a
+    manifest listing files alphabetically would put "afterword.xhtml" before
+    "chapter01.xhtml").
+
     Title priority: EPUB TOC (NCX/NAV) → first H1/H2/H3 heading → "Section N".
     Bare-number headings like "1." are normalised to "Chapter 1".
     """
@@ -98,8 +103,9 @@ def extract_chapters(book, min_len: int) -> list:
     toc_map = _build_toc_map(book.toc)
 
     chapters = []
-    for item in book.get_items():
-        if item.get_type() == ebooklib.ITEM_DOCUMENT:
+    for idref, _linear in book.spine:
+        item = book.get_item_with_id(idref)
+        if item is not None and item.get_type() == ebooklib.ITEM_DOCUMENT:
             soup = BeautifulSoup(item.get_content(), "html.parser")
             for tag in soup(["script", "style", "head"]):
                 tag.decompose()
