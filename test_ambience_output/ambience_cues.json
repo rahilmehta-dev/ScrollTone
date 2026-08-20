@@ -1,0 +1,22 @@
+{
+  "0": {
+    "title": "Chapter One: The Storm",
+    "cues": [
+      {
+        "start_offset": 23,
+        "cue": "rain",
+        "confidence": 1.0
+      },
+      {
+        "start_offset": 565,
+        "cue": "rain",
+        "confidence": 1.0
+      },
+      {
+        "start_offset": 841,
+        "cue": "rain",
+        "confidence": 1.0
+      }
+    ]
+  }
+}

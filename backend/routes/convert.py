@@ -79,6 +79,7 @@ async def convert(
     chapter_indices:  str   = Form(""),   # comma-separated; empty = all chapters
     enhance:          str   = Form("false"),  # broadcast-style ffmpeg post-processing
     multi_voice:      str   = Form("false"),  # LLM speaker attribution
+    ambience:         str   = Form("false"),  # LLM scene-cue detection + ambient mixing
     ollama_url:       str   = Form("http://localhost:11434"),
     ollama_model:     str   = Form("phi3:mini"),
 ):
@@ -176,6 +177,7 @@ async def convert(
             ),
             "enhance":      enhance.lower() == "true",
             "multi_voice":  multi_voice.lower() == "true",
+            "ambience":     ambience.lower() == "true",
             "ollama_url":   ollama_url.strip() or "http://localhost:11434",
             "ollama_model": ollama_model.strip() or "phi3:mini",
         }

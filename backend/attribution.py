@@ -52,7 +52,7 @@ def _regex_split(text: str) -> list[dict]:
 
 # ── Step 2: LLM attribution ───────────────────────────────────────────────────
 
-def _ask_ollama(payload: dict, ollama_url: str, timeout: int) -> str:
+def ask_ollama(payload: dict, ollama_url: str, timeout: int) -> str:
     data = json.dumps(payload).encode()
     req  = urllib.request.Request(
         ollama_url.rstrip("/") + "/api/chat",
@@ -71,6 +71,7 @@ def _ask_attributions(
     ollama_url: str,
     model: str,
     timeout: int,
+    known_characters: list[str] | None = None,
 ) -> list[dict]:
     """Ask the LLM who speaks each numbered dialogue line."""
     numbered = []
@@ -78,16 +79,28 @@ def _ask_attributions(
         preview = segments[seg_i]["text"][:100].replace("\n", " ")
         numbered.append(f'{i + 1}. "{preview}"')
 
+    known_block = ""
+    if known_characters:
+        known_block = (
+            "Recurring characters already identified earlier in this book: "
+            + ", ".join(known_characters) + ".\n"
+            "If a quote's speaker is one of these characters but referred to here by a "
+            "nickname, title, last name only, or a pronoun resolvable from context, answer "
+            "with their exact name as listed above (not the nickname/pronoun/title). "
+            "Only use a new name if the speaker is clearly a different character not in this list.\n\n"
+        )
+
     prompt = (
         "Below is a passage from a novel followed by a numbered list of quoted lines from it.\n"
         "For each number, identify the speaker's name and gender.\n"
+        + known_block +
         "Answer with ONLY one line per number in this exact format:\n"
         "  NUMBER. Name|male   or   NUMBER. Name|female   or   NUMBER. Unknown|unknown\n\n"
         f"PASSAGE:\n{full_text[:3000]}\n\n"
         "QUOTED LINES:\n" + "\n".join(numbered)
     )
 
-    raw = _ask_ollama(
+    raw = ask_ollama(
         {
             "model":   model,
             "messages": [{"role": "user", "content": prompt}],
@@ -127,8 +140,14 @@ def attribute_speakers(
     ollama_url: str,
     model: str,
     timeout: int = 90,
+    known_characters: list[str] | None = None,
 ) -> list[dict]:
     """Split *text* into segments and identify dialogue speakers via Ollama.
+
+    *known_characters* — names already assigned a voice earlier in the book
+    (e.g. from prior chapters, or a persisted registry) — are passed back to
+    the LLM so it can resolve nicknames/titles/pronouns to the same recurring
+    character instead of minting a new entry for each alias.
 
     Returns list of:
         {"type": "narration"|"dialogue",
@@ -145,7 +164,7 @@ def attribute_speakers(
 
     # Step 2 — ask LLM only "who said each line?"
     attributions = _ask_attributions(
-        text, dialogue_indices, segments, ollama_url, model, timeout
+        text, dialogue_indices, segments, ollama_url, model, timeout, known_characters
     )
 
     # Step 3 — merge back

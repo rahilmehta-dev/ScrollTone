@@ -261,9 +261,14 @@ function toggleAdv() {
   document.getElementById('adv-body').classList.toggle('open');
 }
 
-// ─── Multi-voice toggle ───────────────────────────────────────────────────────
-function toggleMultiVoice() {
-  const enabled = document.getElementById('multi_voice').checked;
+// ─── Multi-voice / ambience toggles ───────────────────────────────────────────
+// Both features use the same local Ollama LLM, so the settings block stays
+// visible if either is enabled.
+function toggleMultiVoice() { updateLlmSettingsVisibility(); }
+function toggleAmbience()   { updateLlmSettingsVisibility(); }
+function updateLlmSettingsVisibility() {
+  const enabled = document.getElementById('multi_voice').checked
+                || document.getElementById('ambience').checked;
   document.getElementById('mv-settings').style.display = enabled ? 'block' : 'none';
 }
 
@@ -296,6 +301,7 @@ async function startJob() {
   fd.append('chapter_indices', _getChapterIndices());
   fd.append('enhance',         document.getElementById('enhance').checked);
   fd.append('multi_voice',     document.getElementById('multi_voice').checked);
+  fd.append('ambience',        document.getElementById('ambience').checked);
   fd.append('ollama_url',      document.getElementById('ollama_url').value.trim());
   fd.append('ollama_model',    document.getElementById('ollama_model').value);
 

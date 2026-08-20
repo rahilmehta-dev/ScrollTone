@@ -91,36 +91,39 @@
         <div class="sect">Voice &amp; Narration</div>
 
         <div class="field">
-          <label>Narrator Voice <i class="tip" data-tip="The narrator's voice. In multi-voice mode, characters are assigned different voices automatically — this is used for narration only. af_heart is warm and expressive — best default.">ⓘ</i></label>
+          <label>Narrator Voice <i class="tip" data-tip="The narrator's voice. In multi-voice mode, characters are assigned different voices automatically — this is used for narration only. Grades in parentheses are Kokoro's official per-voice quality grades (A best, F worst) — af_heart (A) is warm and expressive, the best-graded voice overall.">ⓘ</i></label>
           <div style="display:flex;gap:9px;align-items:center">
             <select id="voice" style="flex:1" onchange="stopPreview()">
               <optgroup label="American Female">
-                <option value="af_heart" selected>af_heart — Heart (recommended)</option>
-                <option value="af_bella">af_bella — Bella</option>
-                <option value="af_nicole">af_nicole — Nicole</option>
-                <option value="af_sarah">af_sarah — Sarah</option>
-                <option value="af_sky">af_sky — Sky</option>
+                <option value="af_heart" selected>af_heart — Heart (A, recommended)</option>
+                <option value="af_bella">af_bella — Bella (A-)</option>
+                <option value="af_nicole">af_nicole — Nicole (B-)</option>
+                <option value="af_aoede">af_aoede — Aoede (C+)</option>
+                <option value="af_kore">af_kore — Kore (C+)</option>
+                <option value="af_sarah">af_sarah — Sarah (C+)</option>
+                <option value="af_sky">af_sky — Sky (C-)</option>
               </optgroup>
               <optgroup label="American Male">
-                <option value="am_adam">am_adam — Adam</option>
-                <option value="am_echo">am_echo — Echo</option>
-                <option value="am_eric">am_eric — Eric</option>
-                <option value="am_fenrir">am_fenrir — Fenrir</option>
-                <option value="am_liam">am_liam — Liam</option>
-                <option value="am_michael">am_michael — Michael</option>
-                <option value="am_onyx">am_onyx — Onyx</option>
+                <option value="am_fenrir">am_fenrir — Fenrir (C+, best male)</option>
+                <option value="am_michael">am_michael — Michael (C+)</option>
+                <option value="am_puck">am_puck — Puck (C+)</option>
+                <option value="am_echo">am_echo — Echo (D)</option>
+                <option value="am_eric">am_eric — Eric (D)</option>
+                <option value="am_liam">am_liam — Liam (D)</option>
+                <option value="am_onyx">am_onyx — Onyx (D)</option>
+                <option value="am_adam">am_adam — Adam (F+, weakest)</option>
               </optgroup>
               <optgroup label="British Female">
-                <option value="bf_alice">bf_alice — Alice</option>
-                <option value="bf_emma">bf_emma — Emma</option>
-                <option value="bf_isabella">bf_isabella — Isabella</option>
-                <option value="bf_lily">bf_lily — Lily</option>
+                <option value="bf_emma">bf_emma — Emma (B-)</option>
+                <option value="bf_isabella">bf_isabella — Isabella (C)</option>
+                <option value="bf_alice">bf_alice — Alice (D)</option>
+                <option value="bf_lily">bf_lily — Lily (D)</option>
               </optgroup>
               <optgroup label="British Male">
-                <option value="bm_daniel">bm_daniel — Daniel</option>
-                <option value="bm_fable">bm_fable — Fable</option>
-                <option value="bm_george">bm_george — George</option>
-                <option value="bm_lewis">bm_lewis — Lewis</option>
+                <option value="bm_fable">bm_fable — Fable (C)</option>
+                <option value="bm_george">bm_george — George (C)</option>
+                <option value="bm_lewis">bm_lewis — Lewis (D+)</option>
+                <option value="bm_daniel">bm_daniel — Daniel (D)</option>
               </optgroup>
             </select>
             <button class="btn-preview" id="preview-btn" onclick="previewVoice()" title="Preview voice">▶</button>
@@ -155,6 +158,12 @@
             Multi-voice
             <span style="font-size:.58rem;font-weight:800;letter-spacing:.08em;color:rgba(251,191,36,.85);background:rgba(251,191,36,.1);padding:2px 6px;border-radius:4px;margin-left:2px">BETA</span>
             <i class="tip" data-tip="Uses a local LLM via Ollama to detect dialogue speakers and assign different voices to each character. Requires Ollama running locally.">ⓘ</i>
+          </label>
+          <label class="chk">
+            <input type="checkbox" id="ambience" onchange="toggleAmbience()">
+            Ambient sound
+            <span style="font-size:.58rem;font-weight:800;letter-spacing:.08em;color:rgba(251,191,36,.85);background:rgba(251,191,36,.1);padding:2px 6px;border-radius:4px;margin-left:2px">BETA</span>
+            <i class="tip" data-tip="Uses a local LLM via Ollama to detect ambient scene cues (rain, wind, ocean, fire, forest, crowd) and mixes a quiet looping background bed under the narration. Requires Ollama running locally. Bundled ambience loops are procedurally generated, not third-party recordings — see AMBIENCE_SOUNDS.md.">ⓘ</i>
           </label>
         </div>
 

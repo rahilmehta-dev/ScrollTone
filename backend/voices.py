@@ -3,33 +3,47 @@ Voice catalogue, character-to-voice assignment, and preview generation.
 
 Responsibilities:
 - Static voice pools (female / male) and the known-voice set
-- VoiceMapper: assigns consistent, gender-matched voices to named characters
+- VoiceMapper: assigns consistent, gender-matched voices to named characters,
+  and persists that assignment to disk so it survives across separate runs
 - On-demand preview clip generation (lazy, cached per language)
 """
+import json
 from pathlib import Path
 
 import backend.state as state
 
+REGISTRY_FILENAME = "character_voices.json"
+
+# Ordered best-grade-first per the official Kokoro-82M quality grades
+# (huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md) so round-robin
+# character assignment in VoiceMapper hands out the most natural-sounding
+# voices before falling back to weaker ones.
 FEMALE_VOICES = [
-    "af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky",
-    "bf_alice", "bf_emma", "bf_isabella", "bf_lily",
+    "af_heart", "af_bella",                      # A, A-
+    "af_nicole", "bf_emma",                      # B-
+    "af_aoede", "af_kore", "af_sarah",            # C+
+    "bf_isabella",                                # C
+    "af_sky",                                     # C-
+    "bf_alice", "bf_lily",                        # D
 ]
 MALE_VOICES = [
-    "am_adam", "am_echo", "am_eric", "am_fenrir", "am_liam",
-    "am_michael", "am_onyx",
-    "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
+    "am_fenrir", "am_michael", "am_puck",         # C+ (best available grade for male voices)
+    "bm_fable", "bm_george",                      # C
+    "bm_lewis",                                   # D+
+    "am_echo", "am_eric", "am_liam", "am_onyx", "bm_daniel",  # D
+    "am_adam",                                    # F+
 ]
-KNOWN_VOICES = {
-    "af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky",
-    "am_adam",  "am_echo",  "am_eric",   "am_fenrir",
-    "am_liam",  "am_michael", "am_onyx",
-    "bf_alice", "bf_emma",  "bf_isabella", "bf_lily",
-    "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
-}
+KNOWN_VOICES = set(FEMALE_VOICES) | set(MALE_VOICES)
 
 
 class VoiceMapper:
-    """Assigns consistent, gender-matched voices to characters across chapters."""
+    """Assigns consistent, gender-matched voices to characters across chapters.
+
+    The name -> voice map (plus round-robin pool indices) can be persisted to
+    a JSON file so that re-running generation later — e.g. a partial re-run
+    for just the later chapters of a book — reuses the same voice for a
+    character instead of reassigning it from scratch.
+    """
 
     def __init__(self, narrator_voice: str):
         self.narrator_voice = narrator_voice
@@ -46,6 +60,39 @@ class VoiceMapper:
         if key not in self._map:
             self._map[key] = self._assign(gender)
         return self._map[key]
+
+    def known_names(self) -> list[str]:
+        """Characters already assigned a voice, for LLM re-identification prompts."""
+        return list(self._map.keys())
+
+    def load(self, registry_path: Path) -> None:
+        """Seed the map + pool indices from a previous run's registry, if any.
+
+        Skipped (silently, starting fresh) if the file is missing, unreadable,
+        or was written for a different narrator voice — mixing pool indices
+        across different narrator exclusions could hand out the narrator's
+        own voice to a character.
+        """
+        if not registry_path.exists():
+            return
+        try:
+            data = json.loads(registry_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return
+        if data.get("narrator_voice") != self.narrator_voice:
+            return
+        self._map        = dict(data.get("map", {}))
+        self._female_idx = int(data.get("female_idx", 0))
+        self._male_idx   = int(data.get("male_idx", 0))
+
+    def save(self, registry_path: Path) -> None:
+        registry_path.parent.mkdir(parents=True, exist_ok=True)
+        registry_path.write_text(json.dumps({
+            "narrator_voice": self.narrator_voice,
+            "map":            self._map,
+            "female_idx":     self._female_idx,
+            "male_idx":       self._male_idx,
+        }, indent=2))
 
     def _assign(self, gender: str | None) -> str:
         if gender == "male" and self._male_pool:

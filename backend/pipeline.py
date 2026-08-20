@@ -17,8 +17,10 @@ from pathlib import Path
 import backend.state as state
 from backend.epub_parser import _find_epub_cover, extract_chapters, get_book_metadata
 from backend.audio import write_wav, to_mp3, enhance_wav
-from backend.voices import VoiceMapper
+from backend.voices import VoiceMapper, REGISTRY_FILENAME
 from backend.attribution import attribute_speakers
+from backend.ambience import detect_ambience_cues
+from backend.mixing import build_ambience_track, mix_ambience_under_narration, normalize_loudness
 
 SAMPLE_RATE = 24000   # Kokoro output sample rate
 
@@ -107,11 +109,25 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
 
         done_count = 0
 
-        # ── Voice mapper (shared across all chapters for consistency) ─────────
+        # ── Voice mapper (shared across all chapters for consistency, and ─────
+        #    persisted to out_dir so a later re-run for more chapters of the
+        #    same book reuses the same character → voice assignments) ────────
         voice_mapper = VoiceMapper(settings["voice"]) if settings.get("multi_voice") else None
+        registry_path = Path(settings["out_dir"]) / REGISTRY_FILENAME
         if voice_mapper:
+            voice_mapper.load(registry_path)
             log(f"Multi-voice enabled  |  narrator={settings['voice']}  "
-                f"model={settings['ollama_model']}  url={settings['ollama_url']}\n")
+                f"model={settings['ollama_model']}  url={settings['ollama_url']}")
+            if voice_mapper.known_names():
+                log(f"Loaded existing character registry: {voice_mapper.summary()}\n")
+            else:
+                log("")
+
+        ambience_enabled = bool(settings.get("ambience"))
+        ambience_log_path = Path(settings["out_dir"]) / "ambience_cues.json"
+        ambience_log: dict = {}
+        if ambience_enabled:
+            log(f"Ambient sound enabled  |  model={settings['ollama_model']}  url={settings['ollama_url']}\n")
 
         def _split_chunks(text: str) -> list[str]:
             sentences = re.split(r"(?<=[.!?])\s+", text)
@@ -158,7 +174,8 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
                     f"({len(text):,} chars, {settings['ollama_url']})")
                 try:
                     segments = attribute_speakers(
-                        text, settings["ollama_url"], settings["ollama_model"]
+                        text, settings["ollama_url"], settings["ollama_model"],
+                        known_characters=voice_mapper.known_names(),
                     )
                     dialogue = [segment for segment in segments if segment["type"] == "dialogue"]
                     narration = [segment for segment in segments if segment["type"] == "narration"]
@@ -173,6 +190,7 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
                             preview = segment["text"][:60].replace("\n", " ")
                             log(f"   [Ollama]   {speaker} ({gender}) → {voice}  \"{preview}…\"")
                     log(f"   Characters so far: {voice_mapper.summary()}")
+                    voice_mapper.save(registry_path)
                 except Exception as error:
                     log(f"   [Ollama] ! Attribution failed: {error}")
                     log(f"   [Ollama] ! Falling back to single voice ({settings['voice']})")
@@ -235,6 +253,28 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
                 return (chapter_index, None, None, 0.0)
 
             combined_audio = np.concatenate(chapter_audio)
+
+            if ambience_enabled:
+                try:
+                    cues = detect_ambience_cues(text, settings["ollama_url"], settings["ollama_model"])
+                    ambience_log[str(chapter_index)] = {"title": title, "cues": cues}
+                    ambience_log_path.write_text(json.dumps(ambience_log, indent=2))
+                    if cues:
+                        log(f"   [Ambience] " + ", ".join(
+                            f"{c['cue']}@{c['confidence']:.2f}" for c in cues))
+                        ambience_track = build_ambience_track(
+                            cues, len(text), len(combined_audio), SAMPLE_RATE)
+                        if ambience_track is not None:
+                            combined_audio = mix_ambience_under_narration(
+                                combined_audio, ambience_track, SAMPLE_RATE)
+                            log(f"   [Ambience] mixed under narration ({len(combined_audio)/SAMPLE_RATE:.1f}s)")
+                    else:
+                        log("   [Ambience] no clear cue for this chapter — narration only")
+                except Exception as error:
+                    log(f"   [Ambience] ! Detection/mixing skipped: {error}")
+
+            combined_audio = normalize_loudness(combined_audio)
+
             safe_title     = re.sub(r"[^\w\s-]", "", title)[:35].strip()
             wav_filename   = f"{book_stem}_{safe_title}.wav"
             wav_path       = os.path.join(settings["out_dir"], wav_filename)

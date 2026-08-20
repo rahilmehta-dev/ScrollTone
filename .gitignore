@@ -6,3 +6,6 @@ __pycache__/
 /vtcode.toml
 .DS_Store
 /__pycache__
+/.venv
+scrolltone_multi_speaker_ambience_prompt.md
+AMBIENCE_SOUNDS.md
