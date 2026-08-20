@@ -9,3 +9,5 @@ __pycache__/
 /.venv
 scrolltone_multi_speaker_ambience_prompt.md
 AMBIENCE_SOUNDS.md
+/.venv-higgs
+/test_higgs_output.wav
