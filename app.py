@@ -32,7 +32,7 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 import backend.state as state        # initialises dirs on import
-from backend.routes import convert, preview, ui
+from backend.routes import chapters, clone_test, convert, preview, ui
 
 app = FastAPI(title="ScrollTone")
 
@@ -46,6 +46,8 @@ app.add_middleware(
 api_router = APIRouter(prefix="/api")
 api_router.include_router(ui.router)
 api_router.include_router(preview.router)
+api_router.include_router(chapters.router)
+api_router.include_router(clone_test.router)
 api_router.include_router(convert.router)
 app.include_router(api_router)
 

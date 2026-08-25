@@ -31,6 +31,8 @@ Then open **http://localhost:7860** in your browser.
 - Transformer G2P — better pronunciation for unusual words and names (slower, downloads 457 MB extra)
 - **Enhance Audio** — optional ffmpeg post-processing: compression + 200 Hz warmth boost + 8 kHz harshness cut
 - **Multi-voice (Speaker Attribution)** — local LLM via Ollama detects dialogue speakers and assigns a unique Kokoro voice to each character automatically
+- **Ambient Sound** — local LLM detects scene cues (rain, wind, fire, crowd, …) and mixes a quiet procedurally-generated background bed under the narration (see [AMBIENCE_SOUNDS.md](AMBIENCE_SOUNDS.md))
+- **Voice cloning** — optional Higgs Audio V2 / Chatterbox engines clone a voice from an uploaded reference clip (see "Optional" section below)
 
 ---
 
@@ -108,12 +110,19 @@ When converting multiple EPUBs, books are processed **sequentially** — one boo
 | Device | Auto | CPU, CUDA GPU, or MPS (Apple Silicon) — auto-detected |
 | Transformer G2P | Off | Better pronunciation, much slower, downloads 457 MB extra on first use |
 | Enhance Audio | Off | ffmpeg: compression + 200 Hz warmth + 8 kHz cut. Requires `ffmpeg` on PATH |
-| Multi-voice | Off | LLM speaker attribution via Ollama. Requires Ollama running locally |
-| Ollama URL | `http://localhost:11434` | URL of your local Ollama instance |
-| Ollama Model | `phi3:mini` | Model used for speaker attribution |
+| Multi-voice | Off | LLM speaker attribution via Ollama. Requires Ollama running locally. Kokoro only |
+| Ambient Sound | Off | LLM scene-cue detection (rain, wind, ocean, fire, forest, crowd) via Ollama, mixed quietly under narration. Loops are procedurally generated, not third-party recordings — see [AMBIENCE_SOUNDS.md](AMBIENCE_SOUNDS.md) |
+| Ollama URL | `http://localhost:11434` | URL of your local Ollama instance (shared by Multi-voice and Ambient Sound) |
+| Ollama Model | `phi3:mini` | Model used for speaker attribution / scene-cue detection |
 | Max Chunk Size | `500` chars | Max characters per TTS synthesis call |
 | Chapter Silence | `1.0` s | Silence gap between chapters in merged file |
 | Min Chapter Length | `200` chars | Skip EPUB sections shorter than this |
+| Chatterbox Speed | `1.0×` | Post-hoc ffmpeg time-stretch — Chatterbox has no native rate control |
+| Chatterbox Parallel Workers | `1` | Concurrent Chatterbox subprocesses per chapter (RAM scales ~linearly per worker) |
+| Chatterbox CFG Weight | `0.3` | Lower = more expressive, less tied to the reference clip's exact delivery |
+| Chatterbox Exaggeration | `0.7` | Emotional intensity of the delivery (~0.5 is neutral) |
+| Chatterbox Temperature | `0.8` | Sampling randomness — higher adds natural sentence-to-sentence variation |
+| Chatterbox Breathing Pauses | On | Splices a short synthesized breath between chunk boundaries instead of dead silence |
 
 ---
 
@@ -215,15 +224,23 @@ Audio files are saved to `audiobook_output/BookTitle/` next to the app (or your 
 app.py                  Entry point — boots the FastAPI backend and serves frontend/ at "/"
 
 backend/
-├── routes/              HTTP layer — what the browser calls
-│   ├── convert.py         POST /api/convert, /chapters, /stream, /stop, /download
-│   ├── preview.py         GET  /api/preview/{voice}
-│   └── ui.py               /api/config, /pick-folder, /shutdown
-├── pipeline.py           The orchestrator — reads the EPUB, chunks text, drives Kokoro, writes files
+├── routes/                HTTP layer — what the browser calls
+│   ├── convert.py           POST /api/convert — job lifecycle: /convert, /stream, /stop, /download
+│   ├── chapters.py           POST /api/chapters — chapter list for the pre-convert selection UI
+│   ├── clone_test.py         POST /api/clone-test — short voice-clone preview (Higgs/Chatterbox)
+│   ├── preview.py            GET  /api/preview/{voice}
+│   └── ui.py                  /api/config, /pick-folder, /shutdown
+├── pipeline.py            The orchestrator — reads the EPUB, sets up the run, drives per-chapter synthesis
+├── chapter_processor.py    Per-chapter synthesis + file writing (used by pipeline.py)
+├── job_events.py            SSE event emitter used by pipeline.py/chapter_processor.py
+├── chunking.py               Text chunking + Chatterbox breath-splicing (used by chapter_processor.py)
 ├── epub_parser.py         EPUB chapter/metadata extraction (used by pipeline.py)
-├── attribution.py          Ollama LLM speaker attribution for multi-voice (used by pipeline.py)
+├── attribution.py          Ollama LLM speaker attribution for multi-voice (used by chapter_processor.py)
+├── ambience.py               Ollama LLM ambient-scene-cue detection (used by chapter_processor.py)
+├── mixing.py                  Ambience track generation/mixing, loudness normalization
 ├── voices.py                Voice catalog, VoiceMapper, preview synthesis
-├── audio.py                  WAV/MP3 export, ffmpeg enhancement
+├── audio.py                  WAV/MP3 export, ffmpeg enhancement, reference-clip quality checks
+├── engines/                 Out-of-process Higgs/Chatterbox workers — see "Optional" section above
 ├── state.py                Shared app state (upload/output dirs, job registry)
 └── schemas.py               Pydantic models
 
@@ -231,7 +248,10 @@ frontend/                The web UI (index.html, app.js, style.css), served by a
 
 docs/                    Unrelated — the GitHub Pages marketing/landing site, not part of the running app
 
+tests/                   pytest suite (test_chunker.py) plus fixtures/ (ebooks + audio samples)
+                          used by scripts/test_all_engines.py and the *_test_epub.py generators
+
 scripts/                 Dev helpers (generate_previews.py runs at Docker build time)
 ```
 
-Reading order to understand a conversion request: `backend/routes/convert.py` → `backend/pipeline.py` (`convert_book`, the heart of it) → the leaf modules it calls (`epub_parser.py`, `attribution.py`, `voices.py`, `audio.py`).
+Reading order to understand a conversion request: `backend/routes/convert.py` → `backend/pipeline.py` (`convert_book`, the setup/merge orchestrator) → `backend/chapter_processor.py` (`ChapterProcessor.process`, the per-chapter work) → the leaf modules it calls (`epub_parser.py`, `attribution.py`, `ambience.py`, `voices.py`, `audio.py`, `chunking.py`).

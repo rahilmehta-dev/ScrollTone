@@ -6,12 +6,15 @@ explicitly-described rainstorm.
 Run:
     python scripts/create_ambience_test_epub.py
 Output:
-    test_ambience.epub
+    tests/fixtures/feature_books/test_ambience.epub
 """
 
 import zipfile
+from pathlib import Path
 
-OUT = "test_ambience.epub"
+OUT_DIR = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "feature_books"
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+OUT = str(OUT_DIR / "test_ambience.epub")
 
 CHAPTER_TITLE = "Chapter One: The Storm"
 CHAPTER_BODY = """

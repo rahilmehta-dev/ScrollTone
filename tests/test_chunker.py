@@ -2,23 +2,12 @@
 Smoke tests for the text chunker logic.
 Run with: pytest tests/
 """
-import re
+import sys
+from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-def split_chunks(text: str, chunk_size: int) -> list[str]:
-    """Inline of the current chunker for isolated testing."""
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    chunks, current_chunk = [], ""
-    for sentence in sentences:
-        if len(current_chunk) + len(sentence) + 1 <= chunk_size:
-            current_chunk = (current_chunk + " " + sentence).strip()
-        else:
-            if current_chunk:
-                chunks.append(current_chunk)
-            current_chunk = sentence
-    if current_chunk:
-        chunks.append(current_chunk)
-    return chunks
+from backend.chunking import split_sentences_into_chunks as split_chunks
 
 
 def test_single_sentence_fits():

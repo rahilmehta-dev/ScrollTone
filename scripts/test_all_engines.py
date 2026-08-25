@@ -3,11 +3,11 @@ Chatterbox) using the ACTUAL production code paths — not throwaway
 reimplementations. Standalone script, no UI/server needed.
 
 Fixtures live in the repo:
-    test/test_ebook/         — every *.epub here is processed
-    test/test_audio_sample/  — every audio file here is used as a cloning
-                                reference, one sample at a time, for engines
-                                that need one (Higgs, Chatterbox). Kokoro
-                                doesn't clone, so it only runs once per book.
+    tests/fixtures/ebooks/         — every *.epub here is processed
+    tests/fixtures/audio_samples/  — every audio file here is used as a cloning
+                                      reference, one sample at a time, for engines
+                                      that need one (Higgs, Chatterbox). Kokoro
+                                      doesn't clone, so it only runs once per book.
 
 For each book: Chapter 1 only by default (--chapter-index) — Chatterbox alone
 runs at roughly 6x slower than realtime on CPU, and this is book x engine x
@@ -167,8 +167,8 @@ def run_one(engine: str, chunks: list[str], reference_wav: str | None, out_wav: 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--ebook-dir", default=str(REPO_ROOT / "test" / "test_ebook"))
-    parser.add_argument("--audio-sample-dir", default=str(REPO_ROOT / "test" / "test_audio_sample"))
+    parser.add_argument("--ebook-dir", default=str(REPO_ROOT / "tests" / "fixtures" / "ebooks"))
+    parser.add_argument("--audio-sample-dir", default=str(REPO_ROOT / "tests" / "fixtures" / "audio_samples"))
     parser.add_argument("--chapter-index", type=int, default=0,
                          help="Which chapter to synthesize per book (default: first).")
     parser.add_argument("--min-ch-len", type=int, default=200)

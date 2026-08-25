@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import backend.state as state
 from backend.pipeline import convert_book
 
-EPUB_PATH = Path(__file__).parent.parent / "test_ambience.epub"
+EPUB_PATH = Path(__file__).parent.parent / "tests" / "fixtures" / "feature_books" / "test_ambience.epub"
 OUT_DIR   = Path(__file__).parent.parent / "test_ambience_output"
 
 
