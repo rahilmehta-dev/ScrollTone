@@ -1,0 +1,17 @@
+# ── Higgs Audio V2 engine (optional) ───────────────────────────────────────────
+# Install into a SEPARATE venv, not the main .venv — this stack (transformers/
+# torch pins) is independently validated and may not coexist cleanly with
+# Kokoro's or Chatterbox's dependency versions.
+#
+#   python -m venv .venv-higgs
+#   .venv-higgs/bin/pip install -r requirements-higgs.txt
+#
+# Model weights (~11.8GB) download from HuggingFace on first use.
+# See README "Optional: Higgs Audio V2 / Chatterbox engines".
+
+transformers>=5.15.1
+torch>=2.13.0
+torchaudio>=2.11.0
+accelerate>=1.14.0
+librosa>=0.11.0
+soundfile>=0.14.0

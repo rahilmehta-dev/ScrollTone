@@ -25,7 +25,7 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     settings = {
-        "epub":            str(EPUB_PATH),
+        "source_path":     str(EPUB_PATH),
         "filename":        EPUB_PATH.name,
         "out_dir":         str(OUT_DIR),
         "voice":           "af_heart",

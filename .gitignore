@@ -7,5 +7,8 @@ __pycache__/
 .DS_Store
 /__pycache__
 /.venv
+/.venv-higgs
+/.venv-chatterbox
+/test_output
 scrolltone_multi_speaker_ambience_prompt.md
 AMBIENCE_SOUNDS.md

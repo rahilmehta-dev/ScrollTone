@@ -43,9 +43,9 @@
       <div class="card">
         <div class="sect">Input &amp; Output</div>
 
-        <!-- EPUB upload -->
+        <!-- Book / text upload -->
         <div class="field">
-          <label>Books (EPUB) <i class="tip" data-tip="Drop one or more .epub files. Each book is converted separately and saved into its own subfolder.">ⓘ</i></label>
+          <label>Books (EPUB / TXT) <i class="tip" data-tip="Drop one or more .epub or .txt files. Each book is converted separately and saved into its own subfolder.">ⓘ</i></label>
           <div class="upload-zone" id="drop-zone"
                onclick="document.getElementById('epub-file').click()">
             <span class="up-icon">
@@ -54,11 +54,11 @@
                 <line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
               </svg>
             </span>
-            <div class="up-title">Drop EPUBs here or click to browse</div>
-            <div class="up-sub">.epub files · select multiple to batch convert</div>
+            <div class="up-title">Drop EPUBs or TXT files here or click to browse</div>
+            <div class="up-sub">.epub or .txt files · select multiple to batch convert</div>
             <div class="up-name" id="up-name" style="display:none"></div>
           </div>
-          <input type="file" id="epub-file" accept=".epub" multiple style="display:none">
+          <input type="file" id="epub-file" accept=".epub,.txt" multiple style="display:none">
         </div>
 
         <div class="div"></div>
@@ -91,6 +91,37 @@
         <div class="sect">Voice &amp; Narration</div>
 
         <div class="field">
+          <label>TTS Engine <i class="tip" data-tip="Kokoro is fast, lightweight, and runs in-process — the recommended default. Higgs Audio V2 and Chatterbox clone a voice from a clip you upload, but both require a separate one-time setup (see README) and are far slower than Kokoro.">ⓘ</i></label>
+          <select id="engine" onchange="toggleEngine()">
+            <option value="kokoro" selected>Kokoro — fast, built-in voices (recommended)</option>
+            <option value="higgs">Higgs Audio V2 — cloned voice, ~1x realtime, ~12GB RAM</option>
+            <option value="chatterbox">Chatterbox — cloned voice, CPU-only, ~6x slower than realtime</option>
+          </select>
+        </div>
+
+        <div id="engine-settings" style="display:none;margin-top:10px;padding:12px 14px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)">
+          <div class="field">
+            <label>Reference Voice Clip <i class="tip" data-tip="A short recording of the voice to clone for narration. 8-20 seconds of clean, single-speaker audio works best; minimum 5s.">ⓘ</i></label>
+            <input type="file" id="reference_audio" accept="audio/*" onchange="showReferenceAudio()">
+            <div id="reference-audio-status" style="font-size:.73rem;color:var(--txt-s);margin-top:4px;min-height:0"></div>
+          </div>
+          <div id="engine-warning" style="font-size:.78rem;color:rgba(251,191,36,.9);margin-top:8px"></div>
+
+          <div class="field" id="clone-test-field" style="margin-top:10px">
+            <label>Test the Clone <i class="tip" data-tip="Synthesizes just the first ~100 words of your book with the uploaded reference clip, so you can check whether the cloned voice sounds right before running a full (often multi-hour) conversion.">ⓘ</i></label>
+            <div style="display:flex;gap:9px;align-items:center">
+              <button class="btn-sm" id="clone-test-btn" type="button" onclick="testClone()">▶ Test Clone (~100 words)</button>
+              <audio id="clone-test-audio" controls style="display:none;height:32px;flex:1"></audio>
+            </div>
+            <div id="clone-test-status" style="font-size:.73rem;color:var(--txt-s);margin-top:4px;min-height:0"></div>
+          </div>
+
+          <div style="font-size:.73rem;color:var(--txt-s);margin-top:6px">
+            Requires a one-time setup — see README "Optional: Higgs Audio V2 / Chatterbox engines". Multi-voice is Kokoro-only for now.
+          </div>
+        </div>
+
+        <div class="field" id="kokoro-voice-field">
           <label>Narrator Voice <i class="tip" data-tip="The narrator's voice. In multi-voice mode, characters are assigned different voices automatically — this is used for narration only. Grades in parentheses are Kokoro's official per-voice quality grades (A best, F worst) — af_heart (A) is warm and expressive, the best-graded voice overall.">ⓘ</i></label>
           <div style="display:flex;gap:9px;align-items:center">
             <select id="voice" style="flex:1" onchange="stopPreview()">
@@ -265,6 +296,31 @@
           <div class="field">
             <label>Min Chapter Length <i class="tip" data-tip="Chapters shorter than this number of characters are skipped. Prevents generating audio for copyright pages, blank sections, and table-of-contents entries.">ⓘ</i></label>
             <input type="number" id="min_ch_len" value="200" min="50" max="2000">
+          </div>
+          <div class="field" id="chatterbox-workers-field" style="display:none">
+            <label>Chatterbox Parallel Workers <i class="tip" data-tip="Runs this many Chatterbox subprocesses at once, each with its own model instance, splitting each chapter's chunks between them. Speeds things up on machines with CPU/RAM to spare, but RAM use scales roughly linearly — each worker peaks around 6-7GB.">ⓘ</i></label>
+            <input type="number" id="chatterbox_workers" value="1" min="1" max="16" step="1">
+            <div id="chatterbox-workers-hint" style="font-size:.73rem;color:var(--txt-s);margin-top:4px"></div>
+          </div>
+          <div class="field" id="chatterbox-speed-field" style="display:none">
+            <label>Chatterbox Speed <i class="tip" data-tip="Chatterbox has no native speaking-rate control, so this slows the finished audio down afterward (ffmpeg time-stretch, tone/pitch unchanged) — lower = slower. 1.0 = untouched output. Try 0.85–0.9 if it sounds too fast.">ⓘ</i></label>
+            <input type="number" id="chatterbox_speed" value="1.0" min="0.5" max="1.5" step="0.05">
+            <div style="font-size:.73rem;color:var(--txt-s);margin-top:4px">1.0 = Chatterbox's raw output. Lower = slower, same tone.</div>
+          </div>
+          <div class="field" id="chatterbox-cfg-field" style="display:none">
+            <label>CFG Weight <i class="tip" data-tip="How strictly the output sticks to the reference clip's delivery. Lower = more expressive/varied, less flat-sounding, but drifts further from the reference tone. Higher = calmer, more literal, but can sound monotone/robotic. Default 0.3 favors expressiveness.">ⓘ</i></label>
+            <input type="number" id="chatterbox_cfg_weight" value="0.3" min="0" max="1" step="0.05">
+          </div>
+          <div class="field" id="chatterbox-exaggeration-field" style="display:none">
+            <label>Exaggeration <i class="tip" data-tip="Emotional intensity of the delivery. ~0.5 is neutral. Higher adds more dynamic range/expression; too high (past ~1.2) can distort or sound unstable. Default 0.7 is a natural-sounding middle ground.">ⓘ</i></label>
+            <input type="number" id="chatterbox_exaggeration" value="0.7" min="0.1" max="2" step="0.05">
+          </div>
+          <div class="field" id="chatterbox-temperature-field" style="display:none">
+            <label>Temperature <i class="tip" data-tip="Sampling randomness. Higher adds natural sentence-to-sentence variation (fights the 'reading a script' sameness), but too high risks slurring/artifacts. Default 0.8.">ⓘ</i></label>
+            <input type="number" id="chatterbox_temperature" value="0.8" min="0.05" max="1.5" step="0.05">
+          </div>
+          <div class="field" id="chatterbox-breaths-field" style="display:none">
+            <label><input type="checkbox" id="chatterbox_breaths" checked style="width:auto;margin-right:6px">Natural breathing pauses <i class="tip" data-tip="Chatterbox stitches chunks back-to-back with dead silence, which sounds rushed/robotic. When on, a short synthesized breath sound (not a recording — generated noise shaped like an inhale) is randomly spliced between paragraph-like chunk boundaries instead, for a more natural, podcast-like cadence.">ⓘ</i></label>
           </div>
         </div>
       </div>

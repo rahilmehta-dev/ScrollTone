@@ -61,6 +61,30 @@ Then in ScrollTone: enable **Multi-voice** in Advanced Settings, set the Ollama 
 
 ---
 
+## Optional: Higgs Audio V2 / Chatterbox engines
+
+Kokoro is the default and recommended engine — fast, lightweight, and runs in the same process as the app. ScrollTone can also clone your own voice from a short audio clip using two alternative engines, each of which needs a **one-time, separate setup** (they're not installed by default, and are not bundled into the Docker image):
+
+```bash
+# Higgs Audio V2 — ~11.8GB model download, ~1x realtime, ~12GB RAM
+python -m venv .venv-higgs
+.venv-higgs/bin/pip install -r requirements-higgs.txt
+
+# Chatterbox — ~3GB model download, CPU-only, ~6x slower than realtime
+python -m venv .venv-chatterbox
+.venv-chatterbox/bin/pip install -r requirements-chatterbox.txt
+```
+
+Then in ScrollTone: pick the engine from the **TTS Engine** dropdown and upload a reference voice clip (8-20 seconds of clean, single-speaker audio works best; 5s minimum). Model weights download automatically on first use of that engine.
+
+**Trade-offs to know before choosing one:**
+- **Higgs Audio V2** is licensed under Boson AI's Community License, not Apache/MIT — it requires attribution and a separate commercial license above 100,000 annual active users. It uses ~12GB RAM per conversion.
+- **Chatterbox** is MIT-licensed, but this app **always runs it on CPU**, never MPS/CUDA, regardless of your Device setting — its autoregressive decoder has a confirmed, severe memory leak on Apple's MPS backend (grew past 78GB RSS in testing before being killed). CPU is ~6x slower than realtime but stable (~6.6GB RAM peak for a full chapter in testing). This is a hardcoded safety measure, not a preference.
+- Both engines are narrator-only — **Multi-voice character attribution is Kokoro-only for now.**
+- If a venv isn't set up, ScrollTone logs a clear setup hint in the conversion log rather than crashing.
+
+---
+
 ## Docker RAM Requirements
 
 ScrollTone loads a single Kokoro model per job (~1.5 GB). Allocate at least **4 GB** to Docker Desktop (Settings → Resources → Memory) before running the container.
@@ -75,7 +99,8 @@ When converting multiple EPUBs, books are processed **sequentially** — one boo
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Narrator Voice | `af_heart` | Voice used for narration (and all speech in single-voice mode) |
+| TTS Engine | Kokoro | Kokoro (built-in voices) or Higgs Audio V2 / Chatterbox (clone a voice from an uploaded clip) — see "Optional: Higgs Audio V2 / Chatterbox engines" |
+| Narrator Voice | `af_heart` | Voice used for narration (and all speech in single-voice mode). Kokoro only. |
 | Speed | `1.0×` | Playback speed (0.5 – 2.5) |
 | Output Format | WAV | WAV or MP3 (MP3 embeds cover art & metadata) |
 | MP3 Bitrate | 192 kbps | 128 / 192 / 256 / 320 kbps |

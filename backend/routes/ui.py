@@ -20,7 +20,7 @@ router = APIRouter()
 @router.get("/config")
 def config():
     """Return runtime configuration flags for the frontend."""
-    return {"docker": os.path.exists("/.dockerenv")}
+    return {"docker": os.path.exists("/.dockerenv"), "cpu_count": os.cpu_count() or 1}
 
 
 @router.get("/pick-folder")

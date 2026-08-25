@@ -132,6 +132,57 @@ def extract_chapters(book, min_len: int) -> list:
     return chapters
 
 
+_TXT_HEADING_RE = re.compile(
+    r'^(chapter|part|book|section)\b[\s:.\-]*\S*|^\d+\.?$',
+    re.IGNORECASE,
+)
+
+
+def extract_chapters_from_text(text: str, min_len: int) -> list:
+    """Return list of (title, text) tuples for a plain .txt upload.
+
+    Splits on heading-like lines that sit alone on their own line (e.g.
+    "Chapter 1", "CHAPTER ONE", "PART II", a bare "3."). Falls back to a
+    single "Full Text" chapter when no such headings are found, mirroring
+    extract_chapters()'s title-fallback behavior for EPUBs.
+    """
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+    sections = []  # (title | None, [body lines])
+    current_title = None
+    current_lines: list = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and len(stripped) <= 80 and _TXT_HEADING_RE.match(stripped):
+            if current_lines:
+                sections.append((current_title, current_lines))
+            current_title = stripped
+            current_lines = []
+        else:
+            current_lines.append(line)
+    if current_lines:
+        sections.append((current_title, current_lines))
+
+    no_headings_found = len(sections) == 1 and sections[0][0] is None
+
+    chapters = []
+    for title, body_lines in sections:
+        body = re.sub(r"\s+", " ", " ".join(body_lines)).strip()
+        if len(body) < min_len:
+            continue
+        if not title:
+            title = "Full Text" if no_headings_found else f"Section {len(chapters) + 1}"
+        elif re.match(r'^\d+\.?$', title):
+            title = "Chapter " + title.rstrip(".")
+        chapters.append((title, body))
+
+    if not chapters:
+        whole = re.sub(r"\s+", " ", text).strip()
+        if whole:
+            chapters = [("Full Text", whole)]
+    return chapters
+
+
 def get_book_metadata(book) -> dict:
     """Return {'title': str, 'author': str} from Dublin Core metadata."""
     meta_t = book.get_metadata('DC', 'title')

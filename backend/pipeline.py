@@ -15,12 +15,18 @@ import re
 from pathlib import Path
 
 import backend.state as state
-from backend.epub_parser import _find_epub_cover, extract_chapters, get_book_metadata
-from backend.audio import write_wav, to_mp3, enhance_wav
+from backend.epub_parser import (
+    _find_epub_cover,
+    extract_chapters,
+    extract_chapters_from_text,
+    get_book_metadata,
+)
+from backend.audio import write_wav, to_mp3, enhance_wav, change_tempo, generate_breath
 from backend.voices import VoiceMapper, REGISTRY_FILENAME
 from backend.attribution import attribute_speakers
 from backend.ambience import detect_ambience_cues
 from backend.mixing import build_ambience_track, mix_ambience_under_narration, normalize_loudness
+from backend.engines.runner import synthesize_chapter, EngineNotInstalled
 
 SAMPLE_RATE = 24000   # Kokoro output sample rate
 
@@ -63,30 +69,60 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
 
         memlog("startup")
 
-        # Load the pipeline for this job
-        status("Loading pipeline…")
-        log(f"Initializing pipeline  lang={settings['lang_code']}  trf={settings['trf']}")
-        pipeline = KPipeline(lang_code=settings["lang_code"],
-                              repo_id="hexgrad/Kokoro-82M",
-                              trf=settings["trf"], device=settings["device"])
-        memlog("after pipeline loaded")
-        log(f"Model ready  |  voice={settings['voice']}  speed={settings['speed']:.2f}×\n")
+        engine = settings.get("engine", "kokoro")
 
-        # Read and parse EPUB
-        status("Reading EPUB…")
-        log(f"Reading: {settings['filename']}")
-        book = epub.read_epub(settings["epub"])
-
-        metadata = get_book_metadata(book)
-        settings["book_title_meta"]  = metadata["title"]
-        settings["book_author_meta"] = metadata["author"]
-        settings["cover_data"], settings["cover_mime"] = _find_epub_cover(book)
-        if settings["cover_data"]:
-            log(f"Cover image found ({len(settings['cover_data']) // 1024} KB, {settings['cover_mime']})")
+        # Kokoro's pipeline is only needed when it's the active engine (or for
+        # Multi-voice, which stays Kokoro-only — the /convert route rejects
+        # multi_voice=true combined with a non-Kokoro engine, so that combo
+        # never reaches here). Higgs/Chatterbox run out-of-process entirely
+        # (backend/engines/runner.py), so skip loading Kokoro's model at all
+        # when it won't be used — avoids an unnecessary load and, if
+        # Transformer G2P is on, an unnecessary extra weights download.
+        pipeline = None
+        if engine == "kokoro" or settings.get("multi_voice"):
+            status("Loading pipeline…")
+            log(f"Initializing pipeline  lang={settings['lang_code']}  trf={settings['trf']}")
+            pipeline = KPipeline(lang_code=settings["lang_code"],
+                                  repo_id="hexgrad/Kokoro-82M",
+                                  trf=settings["trf"], device=settings["device"])
+            memlog("after pipeline loaded")
+            log(f"Model ready  |  voice={settings['voice']}  speed={settings['speed']:.2f}×\n")
         else:
-            log("No cover image found in EPUB")
+            workers = settings.get("chatterbox_workers", 1) if engine == "chatterbox" else 1
+            worker_note = f"  |  {workers} parallel workers" if workers > 1 else ""
+            log(f"Engine: {engine}  |  reference={Path(settings['reference_wav']).name}{worker_note}\n")
+            for warning in settings.get("reference_warnings", []):
+                log(f"   ! [reference] {warning}")
 
-        chapters = extract_chapters(book, settings["min_ch_len"])
+        # Read and parse the source book (.epub or .txt)
+        is_txt = Path(settings["source_path"]).suffix.lower() == ".txt"
+
+        if is_txt:
+            status("Reading text file…")
+            log(f"Reading: {settings['filename']}")
+            settings["book_title_meta"]  = ""
+            settings["book_author_meta"] = ""
+            settings["cover_data"], settings["cover_mime"] = None, "image/jpeg"
+            log("No cover image (plain text upload)")
+
+            with open(settings["source_path"], encoding="utf-8", errors="ignore") as text_file:
+                raw_text = text_file.read()
+            chapters = extract_chapters_from_text(raw_text, settings["min_ch_len"])
+        else:
+            status("Reading EPUB…")
+            log(f"Reading: {settings['filename']}")
+            book = epub.read_epub(settings["source_path"])
+
+            metadata = get_book_metadata(book)
+            settings["book_title_meta"]  = metadata["title"]
+            settings["book_author_meta"] = metadata["author"]
+            settings["cover_data"], settings["cover_mime"] = _find_epub_cover(book)
+            if settings["cover_data"]:
+                log(f"Cover image found ({len(settings['cover_data']) // 1024} KB, {settings['cover_mime']})")
+            else:
+                log("No cover image found in EPUB")
+
+            chapters = extract_chapters(book, settings["min_ch_len"])
 
         selected_indices = settings.get("chapter_indices")
         if selected_indices is not None:
@@ -94,7 +130,7 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
             chapters = [chapter for index, chapter in enumerate(chapters) if index in selected_indices_set]
 
         if not chapters:
-            log("No chapters found in EPUB.")
+            log("No chapters found in the uploaded file.")
             job_state["status"] = "error"
             done(); return
 
@@ -106,6 +142,7 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
 
         book_stem     = re.sub(r"[^\w\s-]", "", Path(settings["filename"]).stem)[:50]
         silence_array = np.zeros(int(SAMPLE_RATE * settings["silence"]), dtype=np.float32)
+        breath_rng    = np.random.default_rng()
 
         done_count = 0
 
@@ -141,6 +178,32 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
             if current_chunk: chunks.append(current_chunk)
             return chunks
 
+        def _interleave_breaths(audio_chunks: list) -> list:
+            """Splice a short breath (or, sometimes, just a plain gap) between
+            each chunk boundary — Chatterbox chunks otherwise get concatenated
+            back-to-back with zero gap, which reads as rushed/robotic over a
+            full chapter. Roughly half of boundaries get an audible breath;
+            durations/intensities are randomized so it doesn't sound metronomic.
+            """
+            stitched = [audio_chunks[0]]
+            for chunk in audio_chunks[1:]:
+                if breath_rng.random() < 0.55:
+                    stitched.append(np.zeros(
+                        int(SAMPLE_RATE * breath_rng.uniform(0.08, 0.18)), dtype=np.float32))
+                    stitched.append(generate_breath(
+                        SAMPLE_RATE,
+                        duration=breath_rng.uniform(0.25, 0.4),
+                        intensity=breath_rng.uniform(0.02, 0.045),
+                        rng=breath_rng,
+                    ))
+                    stitched.append(np.zeros(
+                        int(SAMPLE_RATE * breath_rng.uniform(0.05, 0.12)), dtype=np.float32))
+                else:
+                    stitched.append(np.zeros(
+                        int(SAMPLE_RATE * breath_rng.uniform(0.15, 0.3)), dtype=np.float32))
+                stitched.append(chunk)
+            return stitched
+
         # ── Per-chapter synthesis ───────────────────────────────────────────────
         def process_chapter(chapter_index, title, text):
             nonlocal done_count
@@ -154,16 +217,63 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
 
             chapter_audio = []
 
+            def _narrate(texts: list[str], progress_cb=None) -> list:
+                """Synthesize `texts` with the chapter's active engine.
+
+                Kokoro runs in-process via the already-loaded `pipeline`.
+                Higgs/Chatterbox run out-of-process via runner.synthesize_chapter
+                — any per-chunk failures or a safety abort are logged but don't
+                raise, matching the Kokoro path's per-chunk skip-and-continue.
+                """
+                if engine == "kokoro":
+                    out = []
+                    for chunk_index, chunk_text in enumerate(texts):
+                        if job_state["stop_event"].is_set():
+                            raise StopIteration
+                        try:
+                            for _, _, audio in pipeline(chunk_text, voice=settings["voice"], speed=settings["speed"]):
+                                out.append(audio)
+                        except StopIteration:
+                            raise
+                        except Exception as error:
+                            log(f"   ! Ch{chapter_number} chunk {chunk_index + 1} skipped: {error}")
+                        if progress_cb:
+                            progress_cb(chunk_index + 1, len(texts))
+                    return out
+                extra_config = None
+                if engine == "chatterbox":
+                    extra_config = {
+                        "cfg_weight":   settings.get("chatterbox_cfg_weight", 0.3),
+                        "exaggeration": settings.get("chatterbox_exaggeration", 0.7),
+                        "temperature":  settings.get("chatterbox_temperature", 0.8),
+                    }
+                try:
+                    audio_arrays, engine_result = synthesize_chapter(
+                        engine, texts, settings["reference_wav"], settings["device"],
+                        on_progress=(lambda i, n: progress_cb(i, n)) if progress_cb else (lambda i, n: None),
+                        stop_check=job_state["stop_event"].is_set,
+                        extra_config=extra_config,
+                        num_workers=settings.get("chatterbox_workers", 1) if engine == "chatterbox" else 1,
+                    )
+                except EngineNotInstalled as error:
+                    log(f"   ! {error}")
+                    return []
+                if engine_result.get("stopped_by_user"):
+                    log(f"   [{engine}] Stopped by user mid-chapter.")
+                for err in engine_result.get("errors", []):
+                    log(f"   ! [{engine}] {err}")
+                return audio_arrays
+
             # ── Chapter title announcement ────────────────────────────────
             # Prepend: 0.5 s silence → spoken title → 0.75 s silence
             try:
-                title_frames = []
-                for _, _, audio in pipeline(title, voice=settings["voice"], speed=settings["speed"]):
-                    title_frames.append(audio)
+                title_frames = _narrate([title])
                 if title_frames:
                     chapter_audio.append(np.zeros(int(SAMPLE_RATE * 0.5), dtype=np.float32))
                     chapter_audio.extend(title_frames)
                     chapter_audio.append(np.zeros(int(SAMPLE_RATE * 0.75), dtype=np.float32))
+            except StopIteration:
+                raise
             except Exception as title_error:
                 log(f"   ! Title announcement skipped: {title_error}")
 
@@ -226,26 +336,27 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
                                "pct": round((chunk_index + 1) / total_chunks, 3)})
 
             else:
-                # ── Single-voice path (original) ──────────────────────────
-                chunks             = _split_chunks(text)
-                total_chunks       = len(chunks)
-                progress_interval  = max(1, total_chunks // 20)
-                log(f"   {total_chunks} chunks")
+                # ── Single-voice path ───────────────────────────────────
+                chunks       = _split_chunks(text)
+                total_chunks = len(chunks)
+                log(f"   {total_chunks} chunks  (engine={engine})")
                 _push({"type": "ch_start", "ch_i": chapter_index, "chunks": total_chunks})
 
-                for chunk_index, chunk in enumerate(chunks):
-                    if job_state["stop_event"].is_set():
-                        raise StopIteration
-                    try:
-                        for _, _, audio in pipeline(chunk, voice=settings["voice"], speed=settings["speed"]):
-                            chapter_audio.append(audio)
-                    except StopIteration:
-                        raise
-                    except Exception as error:
-                        log(f"   ! Ch{chapter_number} chunk {chunk_index + 1} skipped: {error}")
-                    if (chunk_index + 1) % progress_interval == 0 or chunk_index == total_chunks - 1:
+                # Kokoro is fast enough that many chunks fire per second, so
+                # its progress is throttled to ~20 UI updates/chapter (matches
+                # prior behavior). Higgs/Chatterbox chunks take seconds-to-
+                # minutes each, so every chunk gets its own update.
+                progress_interval = max(1, total_chunks // 20) if engine == "kokoro" else 1
+
+                def _on_chunk_progress(done_n, total_n):
+                    if done_n % progress_interval == 0 or done_n == total_n:
                         _push({"type": "ch_prog", "ch_i": chapter_index,
-                               "pct": round((chunk_index + 1) / total_chunks, 3)})
+                               "pct": round(done_n / total_n, 3)})
+
+                narrated = _narrate(chunks, progress_cb=_on_chunk_progress)
+                if engine == "chatterbox" and settings.get("chatterbox_breaths", True) and len(narrated) > 1:
+                    narrated = _interleave_breaths(narrated)
+                chapter_audio.extend(narrated)
 
             if not chapter_audio:
                 log(f"   (no audio generated)\n")
@@ -279,6 +390,13 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
             wav_filename   = f"{book_stem}_{safe_title}.wav"
             wav_path       = os.path.join(settings["out_dir"], wav_filename)
             write_wav(wav_path, combined_audio, SAMPLE_RATE)
+
+            chatterbox_speed = settings.get("chatterbox_speed", 1.0)
+            if engine == "chatterbox" and chatterbox_speed != 1.0:
+                try:
+                    change_tempo(wav_path, chatterbox_speed)
+                except Exception as error:
+                    log(f"   ! Speed adjustment skipped (Ch{chapter_number}): {error}")
 
             if settings.get("enhance"):
                 try:
@@ -352,6 +470,12 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
             wav_filename = f"{book_stem}_FULL.wav"
             wav_path     = os.path.join(settings["out_dir"], wav_filename)
             write_wav(wav_path, full_audio, SAMPLE_RATE)
+
+            if engine == "chatterbox" and settings.get("chatterbox_speed", 1.0) != 1.0:
+                try:
+                    change_tempo(wav_path, settings["chatterbox_speed"])
+                except Exception as error:
+                    log(f"! Speed adjustment skipped (FULL): {error}")
 
             if settings.get("enhance"):
                 try:

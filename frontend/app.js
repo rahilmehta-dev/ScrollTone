@@ -10,7 +10,15 @@ let batchSources = {};
 let batchState   = {};
 
 // ─── Docker detection ─────────────────────────────────────────────────────────
+let _cpuCount = 4;
 fetch('/api/config').then(r => r.json()).then(d => {
+  if (d.cpu_count) {
+    _cpuCount = d.cpu_count;
+    const workersInput = document.getElementById('chatterbox_workers');
+    if (workersInput) workersInput.max = String(_cpuCount);
+    const hint = document.getElementById('chatterbox-workers-hint');
+    if (hint) hint.textContent = 'This machine has ' + _cpuCount + ' CPU cores. ~6-7GB RAM per worker — keep worker count within what your RAM can hold.';
+  }
   if (!d.docker) return;
   // Hide folder picker button — can't open native dialog in a headless container
   const btn = document.getElementById('folder-btn');
@@ -45,14 +53,14 @@ dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-ove
 dropZone.addEventListener('drop', e => {
   e.preventDefault(); dropZone.classList.remove('drag-over');
   const all   = Array.from(e.dataTransfer.files);
-  const epubs = all.filter(f => f.name.toLowerCase().endsWith('.epub'));
-  if (epubs.length) {
+  const books = all.filter(f => /\.(epub|txt)$/i.test(f.name));
+  if (books.length) {
     fileInput.files = e.dataTransfer.files;
     showFiles(e.dataTransfer.files);
     dropZone.classList.add('drop-flash');
     dropZone.addEventListener('animationend', () => dropZone.classList.remove('drop-flash'), {once:true});
   } else {
-    toast('Please drop .epub files only');
+    toast('Please drop .epub or .txt files only');
   }
 });
 
@@ -62,13 +70,13 @@ function showFiles(fileList) {
   if (fileList.length === 1) {
     const f = fileList[0];
     n.textContent = f.name + '  (' + fmtBytes(f.size) + ')';
-    dropZone.querySelector('.up-title').textContent = 'EPUB loaded';
+    dropZone.querySelector('.up-title').textContent = 'Book loaded';
     dropZone.querySelector('.up-sub').textContent   = 'Click to replace';
     fetchChapters(f);
   } else {
     const total = Array.from(fileList).reduce((s, f) => s + f.size, 0);
     n.textContent = fileList.length + ' books selected  (' + fmtBytes(total) + ')';
-    dropZone.querySelector('.up-title').textContent = fileList.length + ' EPUBs loaded';
+    dropZone.querySelector('.up-title').textContent = fileList.length + ' books loaded';
     dropZone.querySelector('.up-sub').textContent   = 'Click to change selection';
     // Hide chapter card for multi-book batch
     document.getElementById('chapter-card').style.display = 'none';
@@ -272,6 +280,123 @@ function updateLlmSettingsVisibility() {
   document.getElementById('mv-settings').style.display = enabled ? 'block' : 'none';
 }
 
+// ─── TTS Engine toggle ────────────────────────────────────────────────────────
+const ENGINE_WARNINGS = {
+  higgs: 'Uses ~12GB RAM and runs roughly at realtime speed. Licensed under Boson AI\'s Community License (not Apache/MIT) — requires attribution and a commercial license above 100k annual active users.',
+  chatterbox: 'Runs CPU-only in this app (a memory-safety fix, not a setting) — expect roughly 6x the audiobook\'s runtime in processing time.',
+};
+
+function toggleEngine() {
+  const engine = document.getElementById('engine').value;
+  const isKokoro = engine === 'kokoro';
+
+  document.getElementById('kokoro-voice-field').style.display = isKokoro ? '' : 'none';
+  document.getElementById('engine-settings').style.display = isKokoro ? 'none' : 'block';
+  document.getElementById('engine-warning').textContent = ENGINE_WARNINGS[engine] || '';
+  const workersField = document.getElementById('chatterbox-workers-field');
+  const speedField   = document.getElementById('chatterbox-speed-field');
+  const cfgField      = document.getElementById('chatterbox-cfg-field');
+  const exagField     = document.getElementById('chatterbox-exaggeration-field');
+  const tempField      = document.getElementById('chatterbox-temperature-field');
+  const breathsField   = document.getElementById('chatterbox-breaths-field');
+  const showWorkers  = engine === 'chatterbox';
+  workersField.style.display = showWorkers ? 'block' : 'none';
+  speedField.style.display   = showWorkers ? 'block' : 'none';
+  cfgField.style.display     = showWorkers ? 'block' : 'none';
+  exagField.style.display    = showWorkers ? 'block' : 'none';
+  tempField.style.display    = showWorkers ? 'block' : 'none';
+  breathsField.style.display = showWorkers ? 'block' : 'none';
+  if (showWorkers) {
+    const advBtn  = document.getElementById('adv-btn');
+    const advBody = document.getElementById('adv-body');
+    if (advBtn && !advBtn.classList.contains('open')) { advBtn.classList.add('open'); advBody.classList.add('open'); }
+  }
+
+  const multiVoice = document.getElementById('multi_voice');
+  multiVoice.disabled = !isKokoro;
+  if (!isKokoro) multiVoice.checked = false;
+  multiVoice.closest('label').style.opacity = isKokoro ? '' : '.45';
+  multiVoice.closest('label').title = isKokoro ? '' : 'Multi-voice is Kokoro-only for now';
+  updateLlmSettingsVisibility();
+}
+
+// ─── Voice-clone test (Higgs/Chatterbox) ──────────────────────────────────────
+let _cloneTestURL = null;
+
+async function testClone() {
+  const btn     = document.getElementById('clone-test-btn');
+  const status  = document.getElementById('clone-test-status');
+  const audioEl = document.getElementById('clone-test-audio');
+  const engine  = document.getElementById('engine').value;
+  const refInput = document.getElementById('reference_audio');
+
+  if (!fileInput.files || !fileInput.files.length) {
+    toast('Select a book file first'); return;
+  }
+  if (!refInput.files || !refInput.files.length) {
+    toast('Upload a reference voice clip first'); return;
+  }
+
+  let device = document.getElementById('device').value;
+  if (device === 'auto') device = 'cpu';
+
+  const originalLabel = btn.textContent;
+  btn.disabled = true; btn.textContent = '… Testing';
+  status.style.whiteSpace = '';
+  status.textContent = 'Synthesizing ~100 words with ' + engine + ' — this can take a minute or two on CPU…';
+  audioEl.style.display = 'none';
+
+  const fd = new FormData();
+  fd.append('file',             fileInput.files[0]);
+  fd.append('reference_audio',  refInput.files[0]);
+  fd.append('engine',           engine);
+  fd.append('device',           device);
+  fd.append('word_count',       '100');
+  if (engine === 'chatterbox') {
+    fd.append('chatterbox_speed', document.getElementById('chatterbox_speed').value || '1.0');
+    fd.append('chatterbox_cfg_weight',   document.getElementById('chatterbox_cfg_weight').value || '0.3');
+    fd.append('chatterbox_exaggeration', document.getElementById('chatterbox_exaggeration').value || '0.7');
+    fd.append('chatterbox_temperature',  document.getElementById('chatterbox_temperature').value || '0.8');
+  }
+
+  try {
+    const r = await fetch('/api/clone-test', { method: 'POST', body: fd });
+    if (!r.ok) {
+      let detail = '';
+      try { detail = (await r.json()).detail || ''; } catch(_) {}
+      throw new Error(detail || ('HTTP ' + r.status));
+    }
+    const blob = await r.blob();
+    if (_cloneTestURL) URL.revokeObjectURL(_cloneTestURL);
+    _cloneTestURL = URL.createObjectURL(blob);
+    audioEl.src = _cloneTestURL;
+    audioEl.style.display = '';
+    const words = r.headers.get('X-Sample-Words');
+    let warnings = [];
+    try { warnings = JSON.parse(r.headers.get('X-Reference-Warnings') || '[]'); } catch(_) {}
+    status.textContent = 'Done' + (words ? ' — ' + words + ' words' : '') + '. Listen above before running the full conversion.';
+    if (warnings.length) {
+      status.style.whiteSpace = 'pre-line';
+      status.textContent += '\n⚠ ' + warnings.join('\n⚠ ');
+      toast('Reference clip quality warning — see details below the test button');
+    }
+    audioEl.play().catch(() => {});
+  } catch (e) {
+    status.textContent = 'Clone test failed: ' + e.message;
+    toast('Clone test failed');
+  } finally {
+    btn.disabled = false; btn.textContent = originalLabel;
+  }
+}
+
+function showReferenceAudio() {
+  const input  = document.getElementById('reference_audio');
+  const status = document.getElementById('reference-audio-status');
+  if (!input.files || !input.files.length) { status.textContent = ''; return; }
+  const f = input.files[0];
+  status.textContent = f.name + '  (' + fmtBytes(f.size) + ')';
+}
+
 // ─── Format toggle ────────────────────────────────────────────────────────────
 function onFormatChange() {
   const fmt = document.querySelector('input[name="output_format"]:checked').value;
@@ -281,7 +406,13 @@ function onFormatChange() {
 // ─── Start ────────────────────────────────────────────────────────────────────
 async function startJob() {
   if (!fileInput.files || fileInput.files.length === 0) {
-    toast('Please select at least one EPUB file'); return;
+    toast('Please select at least one EPUB or TXT file'); return;
+  }
+
+  const engine = document.getElementById('engine').value;
+  const refInput = document.getElementById('reference_audio');
+  if (engine !== 'kokoro' && (!refInput.files || !refInput.files.length)) {
+    toast('Upload a reference voice clip to clone for this engine'); return;
   }
 
   const fd = new FormData();
@@ -304,6 +435,16 @@ async function startJob() {
   fd.append('ambience',        document.getElementById('ambience').checked);
   fd.append('ollama_url',      document.getElementById('ollama_url').value.trim());
   fd.append('ollama_model',    document.getElementById('ollama_model').value);
+  fd.append('engine',          engine);
+  if (engine !== 'kokoro') { fd.append('reference_audio', refInput.files[0]); }
+  if (engine === 'chatterbox') {
+    fd.append('chatterbox_workers', document.getElementById('chatterbox_workers').value || '1');
+    fd.append('chatterbox_speed',   document.getElementById('chatterbox_speed').value || '1.0');
+    fd.append('chatterbox_cfg_weight',   document.getElementById('chatterbox_cfg_weight').value || '0.3');
+    fd.append('chatterbox_exaggeration', document.getElementById('chatterbox_exaggeration').value || '0.7');
+    fd.append('chatterbox_temperature',  document.getElementById('chatterbox_temperature').value || '0.8');
+    fd.append('chatterbox_breaths',      document.getElementById('chatterbox_breaths').checked);
+  }
 
   switchToOutput();
   resetOutput();
@@ -327,6 +468,10 @@ async function startJob() {
     const d = await r.json();
 
     batchJobIds = d.job_ids;
+
+    if (d.reference_warnings && d.reference_warnings.length) {
+      toast('Reference clip quality warning — see the log for details');
+    }
 
     if (batchJobIds.length === 1) {
       // Single-book path — use existing log+files UI unchanged
