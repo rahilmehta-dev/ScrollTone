@@ -1,14 +1,17 @@
 """Launches a chapter's synthesis on an alternate TTS engine (Higgs Audio V2 or
 Chatterbox) as a subprocess in that engine's own venv, and collects the result.
+Also used for Kokoro, but only when running with multiple Parallel Workers —
+see the "kokoro" entry below and chapter_processor.py's _narrate().
 
 Kept dependency-light (stdlib + numpy/soundfile, both already base deps) so it
 can be imported by the main app process, which does NOT have transformers or
 chatterbox-tts installed — those live only in .venv-higgs / .venv-chatterbox.
-See README "Optional: Higgs Audio V2 / Chatterbox engines" for setup.
+See documentation/engines.md for setup.
 """
 import json
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -28,7 +31,8 @@ ENGINE_CONFIG = {
         "script": Path(__file__).parent / "higgs_synth.py",
         "setup_hint": (
             "python -m venv .venv-higgs && "
-            ".venv-higgs/bin/pip install -r requirements-higgs.txt"
+            ".venv-higgs/bin/pip install transformers torch torchaudio "
+            "accelerate librosa soundfile"
         ),
     },
     "chatterbox": {
@@ -36,8 +40,15 @@ ENGINE_CONFIG = {
         "script": Path(__file__).parent / "chatterbox_synth.py",
         "setup_hint": (
             "python -m venv .venv-chatterbox && "
-            ".venv-chatterbox/bin/pip install -r requirements-chatterbox.txt"
+            ".venv-chatterbox/bin/pip install chatterbox-tts torch torchaudio"
         ),
+    },
+    # No separate venv — Kokoro's deps already live in the main app venv.
+    # venv_python() below special-cases this to the current interpreter.
+    "kokoro": {
+        "venv": None,
+        "script": Path(__file__).parent / "kokoro_synth.py",
+        "setup_hint": "",
     },
 }
 
@@ -47,13 +58,15 @@ class EngineNotInstalled(RuntimeError):
 
 
 def venv_python(engine: str) -> Path:
+    if engine == "kokoro":
+        return Path(sys.executable)
     cfg = ENGINE_CONFIG[engine]
     py = cfg["venv"] / "bin" / "python"
     if not py.exists():
         raise EngineNotInstalled(
             f"{engine} engine is not set up on this machine — expected {cfg['venv']}. "
             f"Set it up with:\n  {cfg['setup_hint']}\n"
-            f"See README 'Optional: Higgs Audio V2 / Chatterbox engines'."
+            f"See documentation/engines.md."
         )
     return py
 

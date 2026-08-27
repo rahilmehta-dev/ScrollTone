@@ -8,6 +8,7 @@ GET  /download/{job_id}/{file}  — download a completed audio file
 """
 import asyncio
 import json
+import os
 import re
 import threading
 import uuid
@@ -55,21 +56,35 @@ async def convert(
     ollama_model:     str   = Form("phi3:mini"),
     engine:              str   = Form("kokoro"),      # kokoro | higgs | chatterbox
     reference_audio:     UploadFile | None = File(None),  # required for higgs/chatterbox
+    kokoro_workers:      int   = Form(1),  # concurrent Kokoro subprocesses per chapter
     chatterbox_workers:  int   = Form(1),  # concurrent Chatterbox subprocesses per chapter
     chatterbox_speed:    float = Form(1.0),  # ffmpeg atempo — Chatterbox has no native rate control
     chatterbox_cfg_weight:   float = Form(0.3),
     chatterbox_exaggeration: float = Form(0.7),
     chatterbox_temperature:  float = Form(0.8),
     chatterbox_breaths:      str   = Form("true"),  # synthetic breath sounds between chunks
+    higgs_temperature:   float = Form(0.3),  # lower than Boson's own 1.0 default — see note below
+    higgs_top_p:         float = Form(0.95),
+    higgs_top_k:         int   = Form(50),
 ):
     if engine not in ("kokoro", "higgs", "chatterbox"):
         raise HTTPException(400, f"Unknown engine: {engine}")
 
+    kokoro_workers      = max(1, min(kokoro_workers, os.cpu_count() or 1))
     chatterbox_workers = max(1, min(chatterbox_workers, 16))
     chatterbox_speed   = max(0.5, min(chatterbox_speed, 1.5))
     chatterbox_cfg_weight   = max(0.0, min(chatterbox_cfg_weight, 1.0))
     chatterbox_exaggeration = max(0.1, min(chatterbox_exaggeration, 2.0))
     chatterbox_temperature  = max(0.05, min(chatterbox_temperature, 1.5))
+    # Every chunk is an independent sampling call (backend/engines/higgs_synth.py
+    # has no cross-chunk state) — Boson's own default temperature=1.0 is tuned
+    # for expressive one-off clips, not hundreds of chunks that all need to
+    # sound like the same narrator. Lower is less randomness = a more
+    # consistent-sounding voice across a whole book, at some cost to
+    # per-line expressiveness.
+    higgs_temperature = max(0.05, min(higgs_temperature, 1.5))
+    higgs_top_p       = max(0.1, min(higgs_top_p, 1.0))
+    higgs_top_k       = max(1, min(higgs_top_k, 200))
 
     if engine != "kokoro":
         if multi_voice.lower() == "true":
@@ -222,12 +237,16 @@ async def convert(
             "ollama_model": ollama_model.strip() or "phi3:mini",
             "engine":              engine,
             "reference_wav":       reference_wav_path,
+            "kokoro_workers":      kokoro_workers,
             "chatterbox_workers":  chatterbox_workers,
             "chatterbox_speed":    chatterbox_speed,
             "chatterbox_cfg_weight":   chatterbox_cfg_weight,
             "chatterbox_exaggeration": chatterbox_exaggeration,
             "chatterbox_temperature":  chatterbox_temperature,
             "chatterbox_breaths":      chatterbox_breaths.lower() == "true",
+            "higgs_temperature":   higgs_temperature,
+            "higgs_top_p":         higgs_top_p,
+            "higgs_top_k":         higgs_top_k,
             "reference_warnings":  reference_warnings,
         }
 

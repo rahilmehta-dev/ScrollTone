@@ -22,7 +22,7 @@ from backend.epub_parser import (
     get_book_metadata,
 )
 from backend.audio import write_wav, to_mp3, enhance_wav, change_tempo
-from backend.voices import VoiceMapper, REGISTRY_FILENAME
+from backend.voices import VoiceMapper, REGISTRY_FILENAME, SAMPLE_TEXT
 from backend.job_events import JobEmitter
 from backend.chapter_processor import ChapterProcessor
 
@@ -245,6 +245,89 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
 
         memlog("done")
         log(f"\nDone! {len(job_state['files'])} file(s) created.")
+        job_state["status"] = "done"
+        done()
+
+    except Exception as error:
+        import traceback
+        log(f"\nError: {error}")
+        log(traceback.format_exc())
+        job_state["status"] = "error"
+        done()
+
+
+def run_preview_job(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoop) -> None:
+    """Preview & Tweak's synthesis job — same job/SSE machinery as
+    convert_book() (routes/convert.py's /stream, /stop, /download all work
+    unchanged on the job_id this produces), but for one synthetic "chapter":
+    backend/voices.py SAMPLE_TEXT, instead of a real uploaded book.
+
+    This is what lets the preview exercise Multi-voice/Ambient sound exactly
+    as a real conversion would (same ChapterProcessor, same Ollama calls),
+    and reports real chunk-by-chunk progress + honors a real server-side
+    Stop — not just an abandoned client-side fetch.
+    """
+    emitter = JobEmitter(job_state, loop)
+    log, status, push, done = emitter.log, emitter.status, emitter.push, emitter.done
+
+    try:
+        engine = settings["engine"]
+
+        pipeline = None
+        if engine == "kokoro" or settings.get("multi_voice"):
+            status("Loading pipeline…")
+            # Reuse the same per-language pipeline cache the quick voice-
+            # audition button warms (backend/voices.py) — repeated Preview
+            # clicks while tweaking parameters would otherwise reload the
+            # whole model from scratch every single time.
+            import backend.state as state
+            lang = settings["lang_code"]
+            with state._preview_lock:
+                if lang not in state._preview_pipeline:
+                    from kokoro import KPipeline
+                    state._preview_pipeline[lang] = KPipeline(
+                        lang_code=lang, repo_id="hexgrad/Kokoro-82M", device=settings["device"])
+                pipeline = state._preview_pipeline[lang]
+            log(f"Model ready  |  voice={settings['voice']}  speed={settings['speed']:.2f}×\n")
+        else:
+            log(f"Engine: {engine}  |  reference={Path(settings['reference_wav']).name}\n")
+            for warning in settings.get("reference_warnings", []):
+                log(f"   ! [reference] {warning}")
+
+        import numpy as np
+        breath_rng = np.random.default_rng()
+
+        voice_mapper = VoiceMapper(settings["voice"]) if settings.get("multi_voice") else None
+        registry_path = Path(settings["out_dir"]) / REGISTRY_FILENAME
+        if voice_mapper:
+            log(f"Multi-voice enabled  |  narrator={settings['voice']}  "
+                f"model={settings['ollama_model']}  url={settings['ollama_url']}\n")
+
+        ambience_enabled = bool(settings.get("ambience"))
+        ambience_log_path = Path(settings["out_dir"]) / "ambience_cues.json"
+        if ambience_enabled:
+            log(f"Ambient sound enabled  |  model={settings['ollama_model']}  url={settings['ollama_url']}\n")
+
+        chapter_processor = ChapterProcessor(
+            job_state=job_state, settings=settings, emitter=emitter,
+            engine=engine, pipeline=pipeline, voice_mapper=voice_mapper,
+            registry_path=registry_path, ambience_enabled=ambience_enabled,
+            ambience_log={}, ambience_log_path=ambience_log_path,
+            book_stem="preview", total_chapters=1, breath_rng=breath_rng,
+            sample_rate=SAMPLE_RATE, announce_title=False,
+        )
+        push({"type": "ch_info", "chapters": [{"i": 0, "title": "Preview Sample"}]})
+        status("Synthesizing preview…")
+
+        try:
+            chapter_processor.process(0, "Preview Sample", SAMPLE_TEXT)
+        except StopIteration:
+            log("\nStopped by user.")
+            job_state["status"] = "cancelled"
+            done()
+            return
+
+        log("\nDone.")
         job_state["status"] = "done"
         done()
 

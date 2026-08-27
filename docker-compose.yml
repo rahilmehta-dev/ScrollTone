@@ -1,6 +1,10 @@
-version: "3.9"
-
-# ScrollTone loads a single Kokoro model per job (~1.5 GB).
+# ScrollTone loads a single Kokoro model per job (~1.5 GB), or one Chatterbox
+# subprocess per chatterbox_workers (~6.6 GB each — runs inside this same
+# container's memory cgroup, since it's a subprocess, not a separate
+# container). mem_limit below covers Kokoro + one Chatterbox worker; raise it
+# proportionally if you set chatterbox_workers > 1 in the UI. Higgs Audio V2
+# uses ~12GB RAM per conversion on its own — if you set that up too, raise
+# mem_limit/memswap_limit further (e.g. 14g/16g) to cover it.
 # Exit code 137 = OOM kill → increase mem_limit below.
 
 services:
@@ -16,21 +20,25 @@ services:
     volumes:
       # Persist generated audiobooks across restarts
       - ./audiobook_output:/tmp/tts_outputs
+      # Higgs/Chatterbox voice cloning (optional) — Linux-native venvs built
+      # INSIDE a container (see documentation/engines.md "Docker" setup).
+      # These can't be host-path bind mounts: a venv built on macOS/Windows
+      # has non-Linux binaries (torch, transformers/chatterbox-tts) that
+      # won't execute here.
+      - higgs-venv:/app/.venv-higgs
+      - chatterbox-venv:/app/.venv-chatterbox
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
-    mem_limit: 4g
-    memswap_limit: 6g
+    mem_limit: 8g
+    memswap_limit: 10g
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # Uncomment for GPU support (requires nvidia-docker):
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+    # For NVIDIA GPU passthrough (Linux + NVIDIA Container Toolkit), don't
+    # uncomment anything here — it would make `docker compose up` refuse to
+    # start on every machine without a GPU. Use the opt-in overlay instead:
+    #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+    # See docker-compose.gpu.yml for what it does and why it's separate.
 
   frontend:
     build:
@@ -42,3 +50,7 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  higgs-venv:
+  chatterbox-venv:

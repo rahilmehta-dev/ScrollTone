@@ -27,7 +27,7 @@ class ChapterProcessor:
     def __init__(self, *, job_state, settings, emitter, engine, pipeline,
                  voice_mapper, registry_path, ambience_enabled, ambience_log,
                  ambience_log_path, book_stem, total_chapters, breath_rng,
-                 sample_rate):
+                 sample_rate, announce_title=True):
         self.job_state = job_state
         self.settings = settings
         self.emitter = emitter
@@ -42,19 +42,34 @@ class ChapterProcessor:
         self.total_chapters = total_chapters
         self.breath_rng = breath_rng
         self.sample_rate = sample_rate
+        # The Preview & Tweak job (backend/pipeline.py run_preview_job) reuses
+        # this class for a synthetic single "chapter" — the sample text — and
+        # doesn't want "Preview Sample" spoken as a title prefix the way a
+        # real chapter's title is.
+        self.announce_title = announce_title
         self.done_count = 0
 
     def _narrate(self, texts: list[str], chapter_number: int, progress_cb=None) -> list:
         """Synthesize `texts` with the chapter's active engine.
 
-        Kokoro runs in-process via the already-loaded `self.pipeline`.
-        Higgs/Chatterbox run out-of-process via runner.synthesize_chapter
-        — any per-chunk failures or a safety abort are logged but don't
-        raise, matching the Kokoro path's per-chunk skip-and-continue.
+        Kokoro normally runs in-process via the already-loaded `self.pipeline`
+        — fastest path, no subprocess/model-load overhead, used whenever
+        Kokoro Parallel Workers is left at 1 (the default). Set above 1 and
+        it instead fans out across that many subprocess workers (each its
+        own KPipeline instance) via runner.synthesize_chapter, the same
+        mechanism Chatterbox's parallel workers already use — a single
+        in-process pipeline can't be handed to multiple threads safely, so
+        real parallelism means separate processes.
+
+        Higgs/Chatterbox always run out-of-process via
+        runner.synthesize_chapter — any per-chunk failures or a safety abort
+        are logged but don't raise, matching the Kokoro path's per-chunk
+        skip-and-continue.
         """
         settings, engine, log = self.settings, self.engine, self.emitter.log
 
-        if engine == "kokoro":
+        kokoro_workers = settings.get("kokoro_workers", 1)
+        if engine == "kokoro" and (kokoro_workers <= 1 or len(texts) <= 1):
             out = []
             for chunk_index, chunk_text in enumerate(texts):
                 if self.job_state["stop_event"].is_set():
@@ -77,13 +92,30 @@ class ChapterProcessor:
                 "exaggeration": settings.get("chatterbox_exaggeration", 0.7),
                 "temperature":  settings.get("chatterbox_temperature", 0.8),
             }
+        elif engine == "higgs":
+            extra_config = {
+                "temperature": settings.get("higgs_temperature", 0.3),
+                "top_p":       settings.get("higgs_top_p", 0.95),
+                "top_k":       settings.get("higgs_top_k", 50),
+            }
+        elif engine == "kokoro":
+            extra_config = {
+                "voice": settings["voice"], "speed": settings["speed"],
+                "lang_code": settings["lang_code"],
+            }
+        if engine == "chatterbox":
+            num_workers = settings.get("chatterbox_workers", 1)
+        elif engine == "kokoro":
+            num_workers = kokoro_workers
+        else:
+            num_workers = 1
         try:
             audio_arrays, engine_result = synthesize_chapter(
-                engine, texts, settings["reference_wav"], settings["device"],
+                engine, texts, settings.get("reference_wav"), settings["device"],
                 on_progress=(lambda i, n: progress_cb(i, n)) if progress_cb else (lambda i, n: None),
                 stop_check=self.job_state["stop_event"].is_set,
                 extra_config=extra_config,
-                num_workers=settings.get("chatterbox_workers", 1) if engine == "chatterbox" else 1,
+                num_workers=num_workers,
             )
         except EngineNotInstalled as error:
             log(f"   ! {error}")
@@ -110,16 +142,17 @@ class ChapterProcessor:
 
         # ── Chapter title announcement ────────────────────────────────
         # Prepend: 0.5 s silence → spoken title → 0.75 s silence
-        try:
-            title_frames = self._narrate([title], chapter_number)
-            if title_frames:
-                chapter_audio.append(np.zeros(int(sample_rate * 0.5), dtype=np.float32))
-                chapter_audio.extend(title_frames)
-                chapter_audio.append(np.zeros(int(sample_rate * 0.75), dtype=np.float32))
-        except StopIteration:
-            raise
-        except Exception as title_error:
-            log(f"   ! Title announcement skipped: {title_error}")
+        if self.announce_title:
+            try:
+                title_frames = self._narrate([title], chapter_number)
+                if title_frames:
+                    chapter_audio.append(np.zeros(int(sample_rate * 0.5), dtype=np.float32))
+                    chapter_audio.extend(title_frames)
+                    chapter_audio.append(np.zeros(int(sample_rate * 0.75), dtype=np.float32))
+            except StopIteration:
+                raise
+            except Exception as title_error:
+                log(f"   ! Title announcement skipped: {title_error}")
 
         if self.voice_mapper:
             # ── Multi-voice path ──────────────────────────────────────

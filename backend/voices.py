@@ -120,19 +120,51 @@ class VoiceMapper:
         return "  |  ".join(f"{n} → {v}" for n, v in self._map.items())
 
 
-PREVIEW_TEXT = (
-    "Hello! I'll be your narrator for this audiobook. "
-    "Whether the story is long or short, I'm here to bring every page to life."
+# One shared ~200-word sample, read by every voice/engine everywhere a preview
+# is generated (quick voice preview, live parameter-tweak preview, and the
+# Higgs/Chatterbox clone test) — so a user judges voices/engines/parameters
+# on the exact same material instead of comparing apples to oranges. It
+# deliberately swings across a few emotional registers (calm, tense, relieved,
+# excited, warm) in one continuous passage, since a flat, single-tone sample
+# can't reveal how expressive — or monotone — a voice actually is.
+SAMPLE_TEXT = (
+    "The rain had been falling since dawn, tapping a slow rhythm against the "
+    "window as Mara sat with her tea gone cold. She almost didn't hear the "
+    "knock at first — three sharp raps, then silence. "
+    '"Who\'s there?" she called, her voice steadier than she felt. '
+    "No answer. Just the wind, and her own heartbeat, suddenly loud in her "
+    "ears. She crossed the room, fingers brushing the doorframe, and pulled "
+    "the door open. Nothing. Only the porch light flickering against an "
+    "empty, rain-slicked street, and somewhere far off, a dog barking twice "
+    "before falling silent again. "
+    "Mara laughed under her breath, a short, shaky sound of relief. "
+    '"Get a grip," she muttered, closing the door and leaning back against '
+    "it. Then the phone rang. She froze. Slowly, she picked it up. "
+    '"Hello?" '
+    '"Mara — it\'s me. I found it." Her brother\'s voice cracked with '
+    "excitement, the words tumbling over each other. "
+    '"The letters, the ones Grandpa hid. They were real. Everything he told '
+    'us, all those years — it was real." '
+    "For a moment she couldn't speak. Years of quiet doubt, of half-believed "
+    "stories told by firelight, dissolved into something warm and enormous "
+    "in her chest. "
+    '"I\'m coming over," she said, already reaching for her coat, smiling '
+    "for the first time in weeks."
 )
 
 
-def _generate_preview(voice: str, out_path: Path) -> None:
-    """Synthesize a short preview clip for *voice* and write it to *out_path*.
+def synthesize_sample(voice: str, speed: float = 1.0, word_count: int | None = None):
+    """Synthesize (a prefix of) SAMPLE_TEXT for *voice* at *speed*.
 
-    Uses a per-language pipeline cache so each language model is loaded only
-    once per process lifetime.  Protected by state._preview_lock so concurrent
+    Returns a float32 numpy array at 24kHz, or None on failure. Uses a
+    per-language pipeline cache so each language model is loaded only once
+    per process lifetime. Protected by state._preview_lock so concurrent
     requests for the same language don't double-load the model.
     """
+    text = SAMPLE_TEXT
+    if word_count is not None:
+        text = " ".join(text.split()[:word_count])
+
     lang = "b" if voice[:2] in ("bf", "bm") else "a"
     with state._preview_lock:
         if lang not in state._preview_pipeline:
@@ -149,9 +181,18 @@ def _generate_preview(voice: str, out_path: Path) -> None:
         pipeline = state._preview_pipeline[lang]
         try:
             import numpy as np
-            import soundfile as sf
-            chunks = [a for _, _, a in pipeline(PREVIEW_TEXT, voice=voice, speed=1.0)]
-            if chunks:
-                sf.write(str(out_path), np.concatenate(chunks), 24000)
+            chunks = [a for _, _, a in pipeline(text, voice=voice, speed=speed)]
+            return np.concatenate(chunks) if chunks else None
         except Exception as e:
             print(f"Preview generation failed for {voice}: {e}", flush=True)
+            return None
+
+
+def _generate_preview(voice: str, out_path: Path) -> None:
+    """Synthesize the default (speed=1.0) preview clip for *voice* and cache
+    it to *out_path* — used for the fast, pre-bakeable common case. Custom
+    speeds are generated on the fly by the route instead (see preview.py)."""
+    audio = synthesize_sample(voice, speed=1.0)
+    if audio is not None:
+        import soundfile as sf
+        sf.write(str(out_path), audio, 24000)

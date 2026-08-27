@@ -107,21 +107,22 @@ main{
   max-width:none;
   padding:0 32px 32px;
 }
-main.has-job{ max-width:none; }
 
-/* ── Desktop: true two-column app layout ─────────────────────────────────── */
+/* ── Desktop: full-width while setting up, two-column once a job is running ── */
 @media(min-width:960px){
-  main{
+  /* Book / Voice & Model pages: no job yet, no Output panel to split with —
+     use the full width instead of reserving a column for it. */
+  main{ display:block; }
+  main.has-job{
     display:grid;
     grid-template-columns:1.15fr 0.85fr;
     column-gap:20px;
     align-items:start;
   }
-  .brand{ grid-column:1/-1; }
-  #left{ grid-column:1; }
-  .out-sticky{
+  main.has-job .brand{ grid-column:1/-1; }
+  main.has-job #left{ grid-column:1; }
+  main.has-job .out-sticky{
     grid-column:2;
-    display:block!important;  /* always visible on desktop */
     position:sticky;top:20px; /* stays in view while settings scroll */
   }
   .btn-back{ display:none!important; }   /* no panel-switching on desktop */
@@ -131,36 +132,32 @@ main.has-job{ max-width:none; }
 
 @media(max-width:900px){main{padding:0 16px 24px}.brand{padding:28px 0 22px}.brand-name{font-size:1.5rem}.brand-inset{padding:14px 24px;gap:14px}}
 
-/* 2-column settings grid */
-.left-grid{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:18px;
-  align-items:stretch;
-  margin-bottom:18px;
-}
-.col{display:flex;flex-direction:column;gap:14px}
+/* ── Wizard pages ────────────────────────────────────────────────────────── */
+/* Page 1 (Book) and page 2 (Voice & Model) — one visible at a time, cards
+   stacked vertically within whichever page is showing. */
+.wizard-page{display:flex;flex-direction:column;gap:14px;margin-bottom:18px}
+.wizard-page .card{display:flex;flex-direction:column}
+.wizard-page .card:nth-child(1){animation-delay:.04s}
+.wizard-page .card:nth-child(2){animation-delay:.1s}
+.wizard-page .card:nth-child(3){animation-delay:.16s}
+.wizard-page .card:nth-child(4){animation-delay:.22s}
 
-/* Cards in the grid */
-.left-grid>.col>.card{
-  display:flex;flex-direction:column;
-}
+/* Book page: upload zone grows to fill available height */
+#page-1 .card .field:first-child{flex:1;display:flex;flex-direction:column}
+#page-1 .card .field:first-child .upload-zone{flex:1;min-height:120px}
 
-/* Left card: upload zone grows to fill the gap */
-.left-grid>.col:first-child>.card>.field:first-child{
-  flex:1;display:flex;flex-direction:column;
+.page-hdr{display:flex;align-items:center;gap:12px;margin-bottom:4px;flex-wrap:wrap}
+.page-count{
+  font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;
+  color:var(--txt-s);
 }
-.left-grid>.col:first-child>.card>.field:first-child .upload-zone{
-  flex:1;min-height:120px;
+.page-title{font-size:1.05rem;font-weight:800;color:var(--txt);margin:0}
+.btn-page-back{
+  background:none;border:none;cursor:pointer;padding:0;
+  font-size:.82rem;font-weight:600;color:var(--txt-m);
+  transition:color .2s;
 }
-
-/* Right card: natural height, no forced spacing */
-.left-grid>.col:last-child>.card{
-  justify-content:flex-start;
-}
-@media(max-width:700px){
-  .left-grid{grid-template-columns:1fr}
-}
+.btn-page-back:hover{color:#a78bfa}
 
 /* ── Left panel transitions ──────────────────────────────────────────────── */
 #left.slide-out{
@@ -182,11 +179,7 @@ main.has-job{ max-width:none; }
 @keyframes fadeUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
 @keyframes brandIn{from{opacity:0;transform:translateY(-12px) scale(.96)}to{opacity:1;transform:none}}
 @keyframes brandFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
-/* Stagger cards in each column */
-.col .card:nth-child(1){animation-delay:.04s}
-.col .card:nth-child(2){animation-delay:.14s}
-.col:last-child .card:nth-child(1){animation-delay:.08s}
-.col:last-child .card:nth-child(2){animation-delay:.18s}
+/* Stagger cards in the output panel */
 .out-sticky .card:nth-child(1){animation-delay:.05s}
 .out-sticky .card:nth-child(2){animation-delay:.1s}
 .out-sticky .card:nth-child(3){animation-delay:.15s}
@@ -195,7 +188,23 @@ main.has-job{ max-width:none; }
 .sect{
   font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;
   color:var(--txt-m);margin-bottom:14px;
+  display:flex;align-items:center;
 }
+
+/* Small inline text-link button (e.g. "Read the sample text") */
+.link-btn{
+  background:none;border:none;padding:0;margin-left:6px;
+  font-size:.78rem;font-weight:600;color:#a78bfa;
+  cursor:pointer;text-decoration:underline;text-underline-offset:2px;
+}
+.link-btn:hover{color:#c4b5fd}
+
+#sample-text-box{
+  font-size:.78rem;color:var(--txt-s);line-height:1.65;font-style:italic;
+  background:var(--well);border-radius:10px;padding:12px 14px;
+  margin-bottom:12px;box-shadow:var(--r-i);
+}
+
 /* Divider */
 .div{height:1px;background:rgba(255,255,255,.05);margin:14px 0}
 
@@ -535,7 +544,7 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
   to  {opacity:1;transform:none}
 }
 
-/* 2-column grid below the status card — mirrors .left-grid on settings page */
+/* 2-column grid below the status card, for batch-mode book cards */
 .out-grid{
   display:grid;
   grid-template-columns:3fr 2fr;
@@ -691,6 +700,33 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 }
 @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .prog-lbl{font-size:.75rem;color:var(--txt-s);min-height:16px}
+
+/* Indeterminate variant — no real percentage to report (preview synthesis is
+   one request/response), just a moving bar to show something is running. */
+.prog-fill.indeterminate{
+  width:35%!important;
+  animation:indeterminate 1.2s ease-in-out infinite;
+}
+@keyframes indeterminate{
+  0%  {transform:translateX(-100%)}
+  100%{transform:translateX(285%)}
+}
+
+/* ── Preview & Tweak log ─────────────────────────────────────────────────── */
+.sample-log{
+  max-height:200px;overflow-y:auto;
+  font-family:'SF Mono',ui-monospace,monospace;
+  font-size:.73rem;line-height:1.7;
+  display:flex;flex-direction:column;gap:1px;
+  background:var(--well);border-radius:var(--radius-s);
+  box-shadow:var(--r-i);padding:8px 10px;
+}
+.sample-log-empty{color:var(--txt-s);padding:2px 6px}
+.sl-line{padding:2px 6px;border-radius:5px;color:var(--txt-m);word-break:break-word}
+.sl-start{color:rgba(167,139,250,.8)}
+.sl-done {color:rgba(52,211,153,.8)}
+.sl-stop {color:var(--warning)}
+.sl-err  {color:var(--danger)}
 
 /* ── Log ─────────────────────────────────────────────────────────────────── */
 .log-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}

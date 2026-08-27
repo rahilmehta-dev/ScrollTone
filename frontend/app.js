@@ -9,6 +9,16 @@ let batchJobIds = [];
 let batchSources = {};
 let batchState   = {};
 
+// ─── Shared preview sample text ────────────────────────────────────────────────
+// Fetched once from the backend (backend/voices.py SAMPLE_TEXT) so the UI
+// never has its own copy to drift out of sync with what's actually spoken.
+let _sampleText = '';
+fetch('/api/sample-text').then(r => r.json()).then(d => { _sampleText = d.text || ''; }).catch(() => {});
+
+// Can this browser open a native save-folder picker itself? Chrome/Edge/Brave
+// only (Firefox/Safari don't implement the File System Access API).
+const _fsAccessSupported = 'showDirectoryPicker' in window;
+
 // ─── Docker detection ─────────────────────────────────────────────────────────
 let _cpuCount = 4;
 fetch('/api/config').then(r => r.json()).then(d => {
@@ -18,21 +28,44 @@ fetch('/api/config').then(r => r.json()).then(d => {
     if (workersInput) workersInput.max = String(_cpuCount);
     const hint = document.getElementById('chatterbox-workers-hint');
     if (hint) hint.textContent = 'This machine has ' + _cpuCount + ' CPU cores. ~6-7GB RAM per worker — keep worker count within what your RAM can hold.';
+
+    const kokoroWorkersInput = document.getElementById('kokoro_workers');
+    if (kokoroWorkersInput) kokoroWorkersInput.max = String(_cpuCount);
+    const kokoroHint = document.getElementById('kokoro-workers-hint');
+    if (kokoroHint) kokoroHint.textContent = 'This machine has ' + _cpuCount + ' CPU cores. ~1.5GB RAM per worker — keep worker count within what your RAM can hold.';
+  }
+  // Processing Device — only offer options this server can actually use
+  // (e.g. MPS never applies inside a Linux Docker container).
+  if (d.devices && d.devices.length) {
+    const DEVICE_LABELS = {
+      auto: 'Auto — best available',
+      cpu:  'CPU only',
+      cuda: 'CUDA GPU',
+      mps:  'Apple Silicon (MPS)',
+    };
+    const deviceSel = document.getElementById('device');
+    if (deviceSel) {
+      deviceSel.innerHTML = d.devices.map(v =>
+        `<option value="${v}"${v === 'auto' ? ' selected' : ''}>${DEVICE_LABELS[v] || v}</option>`
+      ).join('');
+    }
   }
   if (!d.docker) return;
-  // Hide folder picker button — can't open native dialog in a headless container
+  // The container has no GUI for a native OS dialog, and — more fundamentally
+  // — can't write to an arbitrary folder on your device at all (it can only
+  // see what's bind-mounted). The browser itself can, though: it's running on
+  // your actual device. Swap the folder button over to the File System Access
+  // API, which opens a real OS folder picker in the browser and hands us a
+  // handle we can write each finished file into as it completes.
   const btn = document.getElementById('folder-btn');
-  if (btn) btn.style.display = 'none';
-  // Make path input editable so users can type a container-internal path
-  const outDirInput = document.getElementById('out_dir');
-  if (outDirInput) {
-    outDirInput.removeAttribute('readonly');
-    outDirInput.style.cursor = '';
-    outDirInput.placeholder = 'Default — files saved to audiobook_output/ on your host';
+  const hint = document.getElementById('out-dir-hint');
+  if (_fsAccessSupported) {
+    if (btn) { btn.removeAttribute('onclick'); btn.addEventListener('click', chooseDeviceFolder); }
+    if (hint) hint.textContent = 'Click the folder button to choose a folder on this device — finished files are saved there automatically as they complete.';
+  } else {
+    if (btn) { btn.disabled = true; btn.title = 'Choosing a save folder needs Chrome, Edge, or Brave'; }
+    if (hint) hint.textContent = 'Choosing a save folder needs Chrome, Edge, or Brave. Finished files will also appear below to download individually.';
   }
-  // Update hint text
-  const hint = document.querySelector('#out_dir')?.closest('.field')?.querySelector('div[style*="margin-top"]');
-  if (hint) hint.textContent = 'Running in Docker. Output files appear in the audiobook_output/ folder next to your docker-compose.yml.';
   // In Docker, localhost = the container. Ollama runs on the host, so use host.docker.internal.
   const ollamaInp = document.getElementById('ollama_url');
   if (ollamaInp && ollamaInp.value.includes('localhost')) {
@@ -66,6 +99,7 @@ dropZone.addEventListener('drop', e => {
 
 function showFiles(fileList) {
   dropZone.classList.add('has-file');
+  document.getElementById('next-btn').disabled = false;
   const n = document.getElementById('up-name');
   if (fileList.length === 1) {
     const f = fileList[0];
@@ -83,6 +117,13 @@ function showFiles(fileList) {
     _chaptersData = [];
   }
   n.style.display = 'block';
+}
+
+// ─── Wizard pages (1 = Book, 2 = Voice & Model) ────────────────────────────────
+function goToPage(n) {
+  document.getElementById('page-1').style.display = n === 1 ? '' : 'none';
+  document.getElementById('page-2').style.display = n === 2 ? '' : 'none';
+  document.getElementById('left').scrollIntoView({block: 'start'});
 }
 
 function fmtBytes(b) {
@@ -202,7 +243,8 @@ function switchToOutput() {
 
   if (banner) banner.style.display = 'none';
 
-  // Desktop two-column layout: both panels always visible — just activate output
+  // Desktop: switch from the full-width Book/Voice & Model pages to the
+  // two-column layout with the Output panel now visible alongside them.
   if (window.innerWidth >= 960) {
     main.classList.add('has-job');
     out.classList.add('active');
@@ -233,7 +275,8 @@ function backToSettings() {
     if (banner) banner.style.display = 'none';
   }
 
-  // Desktop: both panels always visible, nothing to swap
+  // Desktop: once a job has started, keep the Output panel around (it may
+  // still be running) rather than collapsing back to the full-width layout.
   if (window.innerWidth >= 960) return;
 
   // Mobile: restore settings panel
@@ -261,6 +304,57 @@ async function pickFolder() {
     toast('Folder picker unavailable');
   }
   btn.disabled = false; btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+}
+
+// ─── Save to a folder on this device (Docker) ─────────────────────────────────
+// The Docker container can't write to an arbitrary host path — it only ever
+// sees whatever's bind-mounted. The browser can, though, since it's running on
+// your actual device: the File System Access API opens a real OS folder
+// picker there and hands back a handle we can write into directly. Once set,
+// each finished file is fetched from the server and written into that folder
+// as the conversion produces it — no server-side path involved at all.
+let _deviceDirHandle = null;
+
+async function chooseDeviceFolder() {
+  if (!_fsAccessSupported) {
+    toast('Choosing a save folder needs Chrome, Edge, or Brave');
+    return;
+  }
+  try {
+    _deviceDirHandle = await window.showDirectoryPicker({ id: 'scrolltone-output', mode: 'readwrite' });
+  } catch (e) {
+    return; // user cancelled the picker
+  }
+  document.getElementById('out_dir').value = _deviceDirHandle.name;
+  const status = document.getElementById('device-folder-status');
+  status.textContent = 'Finished files will be saved into "' + _deviceDirHandle.name + '" on this device automatically.';
+  status.style.display = 'block';
+  document.getElementById('clear-device-folder-btn').style.display = 'inline-flex';
+}
+
+function clearDeviceFolder() {
+  _deviceDirHandle = null;
+  document.getElementById('out_dir').value = '';
+  const status = document.getElementById('device-folder-status');
+  status.textContent = ''; status.style.display = 'none';
+  document.getElementById('clear-device-folder-btn').style.display = 'none';
+}
+
+async function saveFileToDevice(forJobId, filename) {
+  if (!_deviceDirHandle) return false;
+  try {
+    const resp = await fetch('/api/download/' + forJobId + '/' + encodeURIComponent(filename));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const blob = await resp.blob();
+    const fileHandle = await _deviceDirHandle.getFileHandle(filename, { create: true });
+    const writable   = await fileHandle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    return true;
+  } catch (e) {
+    console.error('saveFileToDevice failed:', e);
+    return false;
+  }
 }
 
 // ─── Advanced toggle ──────────────────────────────────────────────────────────
@@ -293,6 +387,7 @@ function toggleEngine() {
   document.getElementById('kokoro-voice-field').style.display = isKokoro ? '' : 'none';
   document.getElementById('engine-settings').style.display = isKokoro ? 'none' : 'block';
   document.getElementById('engine-warning').textContent = ENGINE_WARNINGS[engine] || '';
+  document.getElementById('kokoro-workers-field').style.display = isKokoro ? 'block' : 'none';
   const workersField = document.getElementById('chatterbox-workers-field');
   const speedField   = document.getElementById('chatterbox-speed-field');
   const cfgField      = document.getElementById('chatterbox-cfg-field');
@@ -306,7 +401,12 @@ function toggleEngine() {
   exagField.style.display    = showWorkers ? 'block' : 'none';
   tempField.style.display    = showWorkers ? 'block' : 'none';
   breathsField.style.display = showWorkers ? 'block' : 'none';
-  if (showWorkers) {
+  const showHiggsSampling = engine === 'higgs';
+  document.getElementById('higgs-temperature-field').style.display = showHiggsSampling ? 'block' : 'none';
+  document.getElementById('higgs-top-p-field').style.display       = showHiggsSampling ? 'block' : 'none';
+  document.getElementById('higgs-top-k-field').style.display       = showHiggsSampling ? 'block' : 'none';
+
+  if (showWorkers || showHiggsSampling) {
     const advBtn  = document.getElementById('adv-btn');
     const advBody = document.getElementById('adv-body');
     if (advBtn && !advBtn.classList.contains('open')) { advBtn.classList.add('open'); advBody.classList.add('open'); }
@@ -318,75 +418,271 @@ function toggleEngine() {
   multiVoice.closest('label').style.opacity = isKokoro ? '' : '.45';
   multiVoice.closest('label').title = isKokoro ? '' : 'Multi-voice is Kokoro-only for now';
   updateLlmSettingsVisibility();
+
+  // Speech Speed only does anything for Kokoro (Chatterbox has its own
+  // working "Chatterbox Speed" field above; Higgs has no rate control at all).
+  document.getElementById('speed-field').style.display = isKokoro ? '' : 'none';
+
+  // Transformer G2P is Kokoro's own phonemizer upgrade — Higgs/Chatterbox
+  // never touch Kokoro's G2P pipeline, so the toggle would do nothing there.
+  document.getElementById('trf-field').style.display = isKokoro ? '' : 'none';
+
+  // Preview & Tweak — same card, wording/behavior swaps per engine. Switching
+  // engines mid-preview makes whatever's in flight stale, so cancel it.
+  stopSamplePreview();
+  const previewBtn = document.getElementById('sample-preview-btn');
+  if (previewBtn) previewBtn.textContent = isKokoro ? '▶ Preview Voice' : '▶ Preview Cloned Voice';
+  const previewStatus = document.getElementById('sample-preview-status');
+  const previewAudio  = document.getElementById('sample-preview-audio');
+  if (previewStatus) previewStatus.textContent = '';
+  if (previewAudio)  { previewAudio.pause(); previewAudio.style.display = 'none'; }
 }
 
-// ─── Voice-clone test (Higgs/Chatterbox) ──────────────────────────────────────
-let _cloneTestURL = null;
+// ─── Preview & Tweak ────────────────────────────────────────────────────────────
+// The "listen before you run" flow for every engine, backed by the same job/SSE
+// machinery as a real conversion: POST /api/preview-job runs one synthetic
+// "chapter" (backend/voices.py SAMPLE_TEXT) through the real ChapterProcessor
+// (backend/pipeline.py run_preview_job), then GET /api/stream/{job_id} — the
+// exact endpoint a real conversion streams from — reports real chunk-by-chunk
+// progress and logs. That's also what makes Multi-voice/Ambient sound actually
+// run here (same attribute_speakers()/detect_ambience_cues() calls), and lets
+// Stop cancel the job server-side (POST /api/stop/{job_id}) instead of just
+// abandoning a client-side fetch.
+let _samplePreviewURL = null;
+let _sampleJobId = null;
+let _sampleEventSource = null;
+let _sampleLastDesc = '';
 
-async function testClone() {
-  const btn     = document.getElementById('clone-test-btn');
-  const status  = document.getElementById('clone-test-status');
-  const audioEl = document.getElementById('clone-test-audio');
-  const engine  = document.getElementById('engine').value;
-  const refInput = document.getElementById('reference_audio');
-
-  if (!fileInput.files || !fileInput.files.length) {
-    toast('Select a book file first'); return;
+function toggleSampleText() {
+  const box = document.getElementById('sample-text-box');
+  const btn = document.getElementById('sample-text-toggle');
+  const showing = box.style.display !== 'none' && box.textContent;
+  if (showing) {
+    box.style.display = 'none';
+    btn.textContent = 'Read the sample text';
+  } else {
+    box.textContent = _sampleText || 'Sample text unavailable.';
+    box.style.display = 'block';
+    btn.textContent = 'Hide the sample text';
   }
-  if (!refInput.files || !refInput.files.length) {
-    toast('Upload a reference voice clip first'); return;
+}
+
+function _sampleLog(text, cls) {
+  const log   = document.getElementById('sample-log');
+  const empty = document.getElementById('sample-log-empty');
+  if (empty) empty.remove();
+  const line = document.createElement('div');
+  line.className = 'sl-line' + (cls ? ' ' + cls : '');
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  line.textContent = '[' + time + '] ' + text;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function _setSampleRunning(running) {
+  document.getElementById('sample-stop-btn').style.display   = running ? 'inline-flex' : 'none';
+  document.getElementById('sample-prog-track').style.display = running ? 'block' : 'none';
+  const fill = document.getElementById('sample-prog-fill');
+  if (running) {
+    // Indeterminate until the job's first ch_start/ch_prog event arrives —
+    // starting the pipeline (loading a model, etc.) has no chunk count yet.
+    fill.classList.add('indeterminate');
+    fill.style.width = '';
+  } else {
+    fill.classList.remove('indeterminate');
+    fill.style.width = '0%';
   }
+}
 
-  let device = document.getElementById('device').value;
-  if (device === 'auto') device = 'cpu';
+function _closeSampleStream() {
+  if (_sampleEventSource) { _sampleEventSource.close(); _sampleEventSource = null; }
+}
 
-  const originalLabel = btn.textContent;
-  btn.disabled = true; btn.textContent = '… Testing';
-  status.style.whiteSpace = '';
-  status.textContent = 'Synthesizing ~100 words with ' + engine + ' — this can take a minute or two on CPU…';
-  audioEl.style.display = 'none';
+function stopSamplePreview() {
+  if (!_sampleJobId) return;
+  const jobId = _sampleJobId;
+  _sampleJobId = null;
+  fetch('/api/stop/' + jobId, { method: 'POST' }).catch(() => {});
+  _closeSampleStream();
+  document.getElementById('sample-preview-status').textContent = 'Stopped.';
+  _sampleLog('Stopped — ' + _sampleLastDesc, 'sl-stop');
+  _setSampleRunning(false);
+}
+
+async function previewSample() {
+  const engine = document.getElementById('engine').value;
+  const status = document.getElementById('sample-preview-status');
+  const audio  = document.getElementById('sample-preview-audio');
 
   const fd = new FormData();
-  fd.append('file',             fileInput.files[0]);
-  fd.append('reference_audio',  refInput.files[0]);
-  fd.append('engine',           engine);
-  fd.append('device',           device);
-  fd.append('word_count',       '100');
-  if (engine === 'chatterbox') {
-    fd.append('chatterbox_speed', document.getElementById('chatterbox_speed').value || '1.0');
-    fd.append('chatterbox_cfg_weight',   document.getElementById('chatterbox_cfg_weight').value || '0.3');
-    fd.append('chatterbox_exaggeration', document.getElementById('chatterbox_exaggeration').value || '0.7');
-    fd.append('chatterbox_temperature',  document.getElementById('chatterbox_temperature').value || '0.8');
+  fd.append('engine', engine);
+  let desc = engine;
+
+  if (engine === 'kokoro') {
+    const voice = document.getElementById('voice').value;
+    const speed = document.getElementById('speed').value;
+    fd.append('voice', voice);
+    fd.append('speed', speed);
+    desc = 'kokoro · voice=' + voice + ' · speed=' + speed + '×';
+
+    // Multi-voice/Ambient sound apply to the preview too, exactly as they
+    // will to the real book — same attribute_speakers()/detect_ambience_
+    // cues() LLM calls the conversion uses (backend/pipeline.py run_preview_job).
+    const multiVoice = document.getElementById('multi_voice').checked;
+    const ambience   = document.getElementById('ambience').checked;
+    if (multiVoice || ambience) {
+      const ollamaUrl   = document.getElementById('ollama_url').value.trim() || 'http://localhost:11434';
+      const ollamaModel = document.getElementById('ollama_model').value;
+      fd.append('ollama_url', ollamaUrl);
+      fd.append('ollama_model', ollamaModel);
+      desc += ' · model=' + ollamaModel;
+    }
+    if (multiVoice) { fd.append('multi_voice', 'true'); desc += ' · multi-voice=on'; }
+    if (ambience)   { fd.append('ambience', 'true');    desc += ' · ambience=on'; }
+  } else {
+    const refInput = document.getElementById('reference_audio');
+    if (!refInput.files || !refInput.files.length) {
+      toast('Upload a reference voice clip first'); return;
+    }
+    fd.append('reference_audio', refInput.files[0]);
+    let device = document.getElementById('device').value;
+    if (device === 'auto') device = 'cpu';
+    fd.append('device', device);
+    desc += ' · device=' + device;
+
+    if (engine === 'chatterbox') {
+      const cSpeed = document.getElementById('chatterbox_speed').value || '1.0';
+      const cCfg   = document.getElementById('chatterbox_cfg_weight').value || '0.3';
+      const cExag  = document.getElementById('chatterbox_exaggeration').value || '0.7';
+      const cTemp  = document.getElementById('chatterbox_temperature').value || '0.8';
+      fd.append('chatterbox_speed', cSpeed);
+      fd.append('chatterbox_cfg_weight',   cCfg);
+      fd.append('chatterbox_exaggeration', cExag);
+      fd.append('chatterbox_temperature',  cTemp);
+      desc += ' · speed=' + cSpeed + ' · cfg=' + cCfg + ' · exaggeration=' + cExag + ' · temperature=' + cTemp;
+    }
+    if (engine === 'higgs') {
+      const hTemp = document.getElementById('higgs_temperature').value || '0.3';
+      const hTopP = document.getElementById('higgs_top_p').value || '0.95';
+      const hTopK = document.getElementById('higgs_top_k').value || '50';
+      fd.append('higgs_temperature', hTemp);
+      fd.append('higgs_top_p', hTopP);
+      fd.append('higgs_top_k', hTopK);
+      desc += ' · temperature=' + hTemp + ' · top_p=' + hTopP + ' · top_k=' + hTopK;
+    }
+
+    // Ambient sound applies regardless of engine in the real conversion (see
+    // backend/chapter_processor.py), so it's tested here too. Multi-voice
+    // stays Kokoro-only — the checkbox is disabled for other engines already.
+    const ambience = document.getElementById('ambience').checked;
+    if (ambience) {
+      const ollamaUrl   = document.getElementById('ollama_url').value.trim() || 'http://localhost:11434';
+      const ollamaModel = document.getElementById('ollama_model').value;
+      fd.append('ambience', 'true');
+      fd.append('ollama_url', ollamaUrl);
+      fd.append('ollama_model', ollamaModel);
+      desc += ' · ambience=on · model=' + ollamaModel;
+    }
   }
 
+  // Starting a new preview cancels whatever's still running server-side too
+  // — changing a parameter and hitting Preview again doesn't mean waiting
+  // for the old job first. This also logs the old run as "Stopped".
+  stopSamplePreview();
+
+  _sampleLastDesc = desc;
+  _setSampleRunning(true);
+  status.textContent = 'Starting…';
+  audio.style.display = 'none';
+  _sampleLog('Started — ' + desc, 'sl-start');
+
+  let jobId;
   try {
-    const r = await fetch('/api/clone-test', { method: 'POST', body: fd });
+    const r = await fetch('/api/preview-job', { method: 'POST', body: fd });
     if (!r.ok) {
       let detail = '';
       try { detail = (await r.json()).detail || ''; } catch(_) {}
       throw new Error(detail || ('HTTP ' + r.status));
     }
-    const blob = await r.blob();
-    if (_cloneTestURL) URL.revokeObjectURL(_cloneTestURL);
-    _cloneTestURL = URL.createObjectURL(blob);
-    audioEl.src = _cloneTestURL;
-    audioEl.style.display = '';
-    const words = r.headers.get('X-Sample-Words');
-    let warnings = [];
-    try { warnings = JSON.parse(r.headers.get('X-Reference-Warnings') || '[]'); } catch(_) {}
-    status.textContent = 'Done' + (words ? ' — ' + words + ' words' : '') + '. Listen above before running the full conversion.';
-    if (warnings.length) {
-      status.style.whiteSpace = 'pre-line';
-      status.textContent += '\n⚠ ' + warnings.join('\n⚠ ');
-      toast('Reference clip quality warning — see details below the test button');
+    const d = await r.json();
+    jobId = d.job_id;
+    if (d.reference_warnings && d.reference_warnings.length) {
+      toast('Reference clip quality warning — see the log below');
+      d.reference_warnings.forEach(w => _sampleLog('⚠ ' + w, 'sl-err'));
     }
-    audioEl.play().catch(() => {});
   } catch (e) {
-    status.textContent = 'Clone test failed: ' + e.message;
-    toast('Clone test failed');
-  } finally {
-    btn.disabled = false; btn.textContent = originalLabel;
+    status.textContent = 'Preview failed: ' + e.message;
+    _sampleLog('Failed — ' + desc + ': ' + e.message, 'sl-err');
+    _setSampleRunning(false);
+    return;
   }
+
+  _sampleJobId = jobId;
+  _connectSampleStream(jobId, desc);
+}
+
+function _connectSampleStream(jobId, desc) {
+  const status = document.getElementById('sample-preview-status');
+  const audio  = document.getElementById('sample-preview-audio');
+  const fill   = document.getElementById('sample-prog-fill');
+  let totalChunks = 0;
+
+  _closeSampleStream();
+  const es = new EventSource('/api/stream/' + jobId);
+  _sampleEventSource = es;
+
+  es.onmessage = e => {
+    let m;
+    try { m = JSON.parse(e.data); } catch(_) { return; }
+
+    if (m.type === 'log') {
+      const line = m.msg.trim();
+      if (line) _sampleLog(line);
+    } else if (m.type === 'status') {
+      status.textContent = m.msg;
+    } else if (m.type === 'ch_start') {
+      totalChunks = m.chunks || 0;
+      fill.classList.remove('indeterminate');
+      fill.style.width = '0%';
+      status.textContent = totalChunks ? 'Synthesizing — 0/' + totalChunks + ' chunks…' : 'Synthesizing…';
+    } else if (m.type === 'ch_prog') {
+      const pct = Math.round((m.pct || 0) * 100);
+      fill.style.width = pct + '%';
+      const doneChunks = totalChunks ? Math.round((m.pct || 0) * totalChunks) : 0;
+      status.textContent = totalChunks
+        ? 'Synthesizing — ' + doneChunks + '/' + totalChunks + ' chunks (' + pct + '%)…'
+        : 'Synthesizing — ' + pct + '%…';
+    } else if (m.type === 'file') {
+      fetch('/api/download/' + jobId + '/' + encodeURIComponent(m.filename))
+        .then(r => r.ok ? r.blob() : Promise.reject(new Error('HTTP ' + r.status)))
+        .then(blob => {
+          if (_samplePreviewURL) URL.revokeObjectURL(_samplePreviewURL);
+          _samplePreviewURL = URL.createObjectURL(blob);
+          audio.src = _samplePreviewURL;
+          audio.style.display = '';
+          audio.play().catch(() => {});
+        })
+        .catch(err => _sampleLog('Failed to fetch finished audio: ' + err.message, 'sl-err'));
+    } else if (m.type === 'done') {
+      _closeSampleStream();
+      _sampleJobId = null;
+      status.textContent = 'Playing the shared sample.';
+      _sampleLog('Done — ' + desc, 'sl-done');
+      _setSampleRunning(false);
+    }
+  };
+
+  es.onerror = () => {
+    // Stop() already closes the stream and logs "Stopped" itself, so only
+    // treat this as a real failure if we're still tracking this job.
+    if (_sampleJobId === jobId) {
+      _sampleJobId = null;
+      status.textContent = 'Preview failed: connection lost.';
+      _sampleLog('Failed — ' + desc + ': connection lost', 'sl-err');
+    }
+    _closeSampleStream();
+    _setSampleRunning(false);
+  };
 }
 
 function showReferenceAudio() {
@@ -428,7 +724,11 @@ async function startJob() {
   fd.append('min_ch_len',    document.getElementById('min_ch_len').value);
   fd.append('output_format',   document.querySelector('input[name="output_format"]:checked').value);
   fd.append('bitrate',         document.getElementById('bitrate').value);
-  fd.append('custom_out_dir',  document.getElementById('out_dir').value.trim());
+  // A device-folder handle is a browser-side concept only — the container
+  // has no use for its display name as a server path, so don't send one; the
+  // server just uses its own default location, and saveFileToDevice() copies
+  // each finished file into the chosen folder as it completes (see below).
+  fd.append('custom_out_dir', _deviceDirHandle ? '' : document.getElementById('out_dir').value.trim());
   fd.append('chapter_indices', _getChapterIndices());
   fd.append('enhance',         document.getElementById('enhance').checked);
   fd.append('multi_voice',     document.getElementById('multi_voice').checked);
@@ -436,6 +736,7 @@ async function startJob() {
   fd.append('ollama_url',      document.getElementById('ollama_url').value.trim());
   fd.append('ollama_model',    document.getElementById('ollama_model').value);
   fd.append('engine',          engine);
+  if (engine === 'kokoro') { fd.append('kokoro_workers', document.getElementById('kokoro_workers').value || '1'); }
   if (engine !== 'kokoro') { fd.append('reference_audio', refInput.files[0]); }
   if (engine === 'chatterbox') {
     fd.append('chatterbox_workers', document.getElementById('chatterbox_workers').value || '1');
@@ -444,6 +745,11 @@ async function startJob() {
     fd.append('chatterbox_exaggeration', document.getElementById('chatterbox_exaggeration').value || '0.7');
     fd.append('chatterbox_temperature',  document.getElementById('chatterbox_temperature').value || '0.8');
     fd.append('chatterbox_breaths',      document.getElementById('chatterbox_breaths').checked);
+  }
+  if (engine === 'higgs') {
+    fd.append('higgs_temperature', document.getElementById('higgs_temperature').value || '0.3');
+    fd.append('higgs_top_p',       document.getElementById('higgs_top_p').value || '0.95');
+    fd.append('higgs_top_k',       document.getElementById('higgs_top_k').value || '50');
   }
 
   switchToOutput();
@@ -505,7 +811,13 @@ function handleMsg(m) {
   }
   else if (m.type === 'status')   setStatus(m.msg);
   else if (m.type === 'progress') setProg(m.value, m.label);
-  else if (m.type === 'file')     { addFile(m); if (m.chapter > 0) _chDone(m.chapter - 1, m.duration); }
+  else if (m.type === 'file')     {
+    addFile(m);
+    if (m.chapter > 0) _chDone(m.chapter - 1, m.duration);
+    if (_deviceDirHandle) {
+      saveFileToDevice(jobId, m.filename).then(ok => { if (ok) toast('Saved "' + m.filename + '" to your device'); });
+    }
+  }
   else if (m.type === 'done')     onDone(m.files);
   else if (m.type === 'ch_info')  _initChGrid(m.chapters);
   else if (m.type === 'ch_start') _chStart(m.ch_i, m.chunks);
@@ -570,6 +882,7 @@ function handleBatchMsg(id, m) {
     s.files.push(m);
     s.totalDur += (m.duration || 0);
     updateBookCard(id);
+    if (_deviceDirHandle) saveFileToDevice(id, m.filename);
   } else if (m.type === 'done') {
     if (batchSources[id]) { batchSources[id].close(); delete batchSources[id]; }
     s.status    = 'done';
@@ -857,6 +1170,8 @@ function addLog(raw, cls) {
 function addFile(f) {
   const list  = document.getElementById('file-list');
   if (!list) return;
+  const card = document.getElementById('files-card');
+  if (card) card.style.display = 'block';
   const empty = list.querySelector('.empty');
   if (empty) empty.remove();
 
@@ -910,14 +1225,16 @@ function resetOutput() {
   if (olSum)  olSum.textContent = '';
 
   // Clear batch grid, hide out-path card, wipe log + file-list content
-  const outGrid  = document.getElementById('out-grid');
-  const pathCard = document.getElementById('out-path-card');
-  const logEl    = document.getElementById('log');
-  const flEl     = document.getElementById('file-list');
-  if (outGrid)  { outGrid.className = 'out-grid'; outGrid.innerHTML = ''; }
-  if (pathCard) pathCard.style.display = 'none';
-  if (logEl)    logEl.innerHTML  = '';
-  if (flEl)     flEl.innerHTML   = '';
+  const outGrid   = document.getElementById('out-grid');
+  const pathCard  = document.getElementById('out-path-card');
+  const logEl     = document.getElementById('log');
+  const flEl      = document.getElementById('file-list');
+  const filesCard = document.getElementById('files-card');
+  if (outGrid)   { outGrid.className = 'out-grid'; outGrid.innerHTML = ''; }
+  if (pathCard)  pathCard.style.display = 'none';
+  if (logEl)     logEl.innerHTML  = '';
+  if (flEl)      flEl.innerHTML   = '';
+  if (filesCard) filesCard.style.display = 'none';
   setProg(0, '');
 }
 
