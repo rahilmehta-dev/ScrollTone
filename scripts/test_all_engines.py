@@ -34,20 +34,20 @@ Per book, this runs:
 Requires:
   - Run with the MAIN venv (.venv) — runner.py only needs stdlib/numpy/
     soundfile, which are already base deps; it shells out to .venv-higgs /
-    .venv-chatterbox internally for the heavy engines (see README "Optional:
-    Higgs Audio V2 / Chatterbox engines" for setup).
+    .venv-chatterbox internally for the heavy engines (see
+    documentation/engines.md for setup).
 
 Usage:
     .venv/bin/python scripts/test_all_engines.py
 
 Output layout:
-    test_output/<book_stem>/kokoro.wav                     (no sample used)
-    test_output/<book_stem>/results_kokoro.json
-    test_output/<book_stem>/<sample_stem>/higgs.wav         (one folder per
-    test_output/<book_stem>/<sample_stem>/chatterbox.wav     sample, grouping
-    test_output/<book_stem>/<sample_stem>/results_*.json     that sample's runs)
-    test_output/SUMMARY.md                                  (one top-level table)
-test_output/ is gitignored — not meant to be committed.
+    tests/output/engines/<book_stem>/kokoro.wav                     (no sample used)
+    tests/output/engines/<book_stem>/results_kokoro.json
+    tests/output/engines/<book_stem>/<sample_stem>/higgs.wav         (one folder per
+    tests/output/engines/<book_stem>/<sample_stem>/chatterbox.wav     sample, grouping
+    tests/output/engines/<book_stem>/<sample_stem>/results_*.json     that sample's runs)
+    tests/output/engines/SUMMARY.md                                  (one top-level table)
+tests/output/ is gitignored — not meant to be committed.
 """
 import argparse
 import json
@@ -172,7 +172,7 @@ def main():
     parser.add_argument("--chapter-index", type=int, default=0,
                          help="Which chapter to synthesize per book (default: first).")
     parser.add_argument("--min-ch-len", type=int, default=200)
-    parser.add_argument("--out-dir", default=str(REPO_ROOT / "test_output"))
+    parser.add_argument("--out-dir", default=str(REPO_ROOT / "tests" / "output" / "engines"))
     parser.add_argument("--engines", nargs="+", default=["kokoro", "higgs", "chatterbox"],
                          choices=["kokoro", "higgs", "chatterbox"])
     parser.add_argument("--max-parallel", action="store_true",
@@ -237,8 +237,8 @@ def main():
 
         # higgs / chatterbox: once per audio sample, grouped into a folder
         # per sample so outputs from different samples never mix together:
-        #   test_output/<book>/<sample_stem>/higgs.wav
-        #   test_output/<book>/<sample_stem>/chatterbox.wav
+        #   tests/output/engines/<book>/<sample_stem>/higgs.wav
+        #   tests/output/engines/<book>/<sample_stem>/chatterbox.wav
         for sample_path in samples:
             sample_stem = re.sub(r"[^\w-]", "_", sample_path.stem)[:40]
             sample_out_dir = book_out_dir / sample_stem

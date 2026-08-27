@@ -8,6 +8,5 @@ __pycache__/
 /.venv
 /.venv-higgs
 /.venv-chatterbox
-/test_output
-/test_ambience_output
-scrolltone_multi_speaker_ambience_prompt.md
+/tests/output
+/audiobook_output

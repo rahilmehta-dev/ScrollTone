@@ -7,7 +7,7 @@ and bundling real third-party recordings would mean tracking a license per
 clip. Instead, each loop below is synthesized from scratch with plain DSP
 (shaped noise + periodic modulation) directly into backend/assets/ambience/
 -- there is no third-party asset involved and nothing to license. See
-AMBIENCE_SOUNDS.md for the full rationale.
+documentation/ambience.md for the full rationale.
 
 Every generator builds its loop directly in the frequency domain (random
 phase per FFT bin, then a single inverse FFT into a fixed-length buffer).

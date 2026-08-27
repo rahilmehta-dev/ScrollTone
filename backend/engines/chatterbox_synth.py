@@ -2,7 +2,7 @@
 
 Not part of the main app's import graph — invoked as a subprocess via the
 `.venv-chatterbox` interpreter (backend/pipeline.py launches it per chapter).
-See README "Optional: Higgs Audio V2 / Chatterbox engines".
+See documentation/engines.md.
 
 CRITICAL: device is hardcoded to "cpu" and NOT read from the job file or any
 setting. Chatterbox's autoregressive decoder has a reproducible, severe memory
@@ -34,7 +34,7 @@ SAFE_RSS_LIMIT_GB = 20.0  # defense-in-depth; CPU peaked ~6.6GB in testing
 # Defaults, overridable per-job via job.json (see ENGINE_CONFIG's extra_config
 # passthrough in runner.py) — tuned lower cfg_weight / raised exaggeration
 # vs. the library's own defaults (0.5 / 0.5) for less flat, less robotic
-# delivery. See README for what each knob does.
+# delivery. See documentation/settings.md for what each knob does.
 CFG_WEIGHT = 0.3
 EXAGGERATION = 0.7
 TEMPERATURE = 0.8

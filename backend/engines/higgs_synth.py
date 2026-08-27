@@ -3,7 +3,7 @@
 Not part of the main app's import graph — invoked as a subprocess via the
 `.venv-higgs` interpreter (backend/pipeline.py launches it per chapter), so it
 can depend on transformers/torch without those being installed in the main
-ScrollTone venv. See README "Optional: Higgs Audio V2 / Chatterbox engines".
+ScrollTone venv. See documentation/engines.md.
 
 Usage:
     .venv-higgs/bin/python backend/engines/higgs_synth.py <job.json>

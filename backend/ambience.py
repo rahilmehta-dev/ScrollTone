@@ -16,7 +16,7 @@ import re
 from backend.attribution import ask_ollama
 
 # Categories are deliberately limited to the ambient loops actually bundled
-# in backend/assets/ambience/ (see Phase 3 / AMBIENCE_SOUNDS.md) — asking the
+# in backend/assets/ambience/ (see documentation/ambience.md) — asking the
 # LLM to only choose from a fixed, backed vocabulary avoids ever landing on a
 # cue with no audio to play.
 AMBIENCE_CATEGORIES = ["rain", "wind", "ocean", "fire", "forest", "crowd"]

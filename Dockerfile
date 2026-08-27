@@ -15,8 +15,14 @@ WORKDIR /app
 # PyTorch CPU-only (~500 MB vs ~2 GB for GPU build)
 RUN pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-COPY requirements.txt .
-RUN pip install -r requirements.txt psutil
+# requirements.txt (repo root) also lists the optional Higgs/Chatterbox engine
+# deps in its "optional" sections — those are deliberately NOT installed here
+# so the image stays small and keeps the CPU-only torch build above. Install
+# the core list by name instead of `pip install -r requirements.txt` for that
+# reason; keep this list in sync with requirements.txt's "Core" section.
+RUN pip install \
+    fastapi psutil pydub mutagen "uvicorn[standard]" python-multipart \
+    jinja2 kokoro espeakng-loader soundfile ebooklib beautifulsoup4 numpy
 
 # ── Pre-download models into the image layer ──────────────────────────────────
 # This runs once at build time so the container never downloads at runtime.
@@ -31,13 +37,19 @@ print('Kokoro model cached OK'); \
 del p"
 
 # ── Copy application ──────────────────────────────────────────────────────────
+# generate_previews.py only needs app.py/backend/ (it imports backend.voices
+# for the shared sample text) — copy just that much and run it before
+# frontend/ and the rest of scripts/, so editing the UI doesn't bust the
+# cache on this step (~5-10 min: re-synthesizes all 20 voices).
 COPY app.py .
 COPY backend/ backend/
-COPY frontend/ frontend/
-COPY scripts/ scripts/
+COPY scripts/generate_previews.py scripts/generate_previews.py
 
 # Pre-generate voice preview samples for all 20 voices (~10 MB, instant playback in UI)
 RUN python scripts/generate_previews.py
+
+COPY frontend/ frontend/
+COPY scripts/ scripts/
 
 RUN mkdir -p /tmp/tts_uploads /tmp/tts_outputs
 

@@ -10,6 +10,7 @@
 #                 Linux:  sudo apt install libsndfile1
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── Core (Kokoro engine + web app) ─────────────────────────────────────────────
 fastapi>=0.104.0
 psutil>=5.9.0
 pydub>=0.25.1
@@ -19,7 +20,31 @@ python-multipart>=0.0.6
 jinja2>=3.1.0
 kokoro>=0.9.2
 espeakng-loader>=0.2.4
-soundfile>=0.12.1
+soundfile>=0.14.0
 ebooklib>=0.18
 beautifulsoup4>=4.12.0
 numpy>=1.24.0
+
+# ── Higgs Audio V2 engine (optional voice cloning) ─────────────────────────────
+# The app shells out to a SEPARATE venv for this engine at runtime
+# (backend/engines/runner.py hardcodes .venv-higgs) — installing these packages
+# into the main venv is not enough to enable Higgs. See
+# documentation/engines.md for the .venv-higgs setup command.
+# Model weights (~11.8GB) download from HuggingFace on first use.
+transformers>=5.15.1
+torch>=2.13.0
+torchaudio>=2.11.0
+accelerate>=1.14.0
+librosa>=0.11.0
+
+# ── Chatterbox engine (optional voice cloning) ─────────────────────────────────
+# The app shells out to a SEPARATE venv for this engine at runtime
+# (backend/engines/runner.py hardcodes .venv-chatterbox) — installing these
+# packages into the main venv is not enough to enable Chatterbox. See
+# documentation/engines.md for the .venv-chatterbox setup command.
+# Model weights (~3GB) download from HuggingFace on first use. This app always
+# runs Chatterbox on CPU (backend/engines/chatterbox_synth.py hardcodes
+# device="cpu"), never MPS/CUDA — Chatterbox's autoregressive decoder has a
+# confirmed, severe memory leak on Apple's MPS backend (grew past 78GB RSS in
+# testing). Do not override this without re-validating from scratch.
+chatterbox-tts>=0.1.7
