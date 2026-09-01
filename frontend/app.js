@@ -10,7 +10,7 @@ let batchSources = {};
 let batchState   = {};
 
 // ─── Shared preview sample text ────────────────────────────────────────────────
-// Fetched once from the backend (backend/voices.py SAMPLE_TEXT) so the UI
+// Fetched once from the backend (backend/voices.py PREVIEW_JOB_TEXT) so the UI
 // never has its own copy to drift out of sync with what's actually spoken.
 let _sampleText = '';
 fetch('/api/sample-text').then(r => r.json()).then(d => { _sampleText = d.text || ''; }).catch(() => {});
@@ -99,13 +99,13 @@ dropZone.addEventListener('drop', e => {
 
 function showFiles(fileList) {
   dropZone.classList.add('has-file');
-  document.getElementById('next-btn').disabled = false;
   const n = document.getElementById('up-name');
   if (fileList.length === 1) {
     const f = fileList[0];
     n.textContent = f.name + '  (' + fmtBytes(f.size) + ')';
     dropZone.querySelector('.up-title').textContent = 'Book loaded';
     dropZone.querySelector('.up-sub').textContent   = 'Click to replace';
+    _showCoverStrip(f.name);
     fetchChapters(f);
   } else {
     const total = Array.from(fileList).reduce((s, f) => s + f.size, 0);
@@ -114,17 +114,128 @@ function showFiles(fileList) {
     dropZone.querySelector('.up-sub').textContent   = 'Click to change selection';
     // Hide chapter card for multi-book batch
     document.getElementById('chapter-card').style.display = 'none';
+    document.getElementById('cover-strip').style.display = 'none';
+    _resetAtmosphere(); // no single cover to take the room's color from
     _chaptersData = [];
   }
   n.style.display = 'block';
 }
 
-// ─── Wizard pages (1 = Book, 2 = Voice & Model) ────────────────────────────────
-function goToPage(n) {
-  document.getElementById('page-1').style.display = n === 1 ? '' : 'none';
-  document.getElementById('page-2').style.display = n === 2 ? '' : 'none';
-  document.getElementById('left').scrollIntoView({block: 'start'});
+// ─── Cover strip ────────────────────────────────────────────────────────────
+// Shows immediately with a filename-based title as an optimistic placeholder,
+// then _applyCoverData() (called once /api/chapters resolves) fills in the
+// real title/author/cover art the backend already extracts for MP3 tagging.
+function _showCoverStrip(filename) {
+  const strip = document.getElementById('cover-strip');
+  const img   = document.getElementById('cover-img');
+  const fallback = document.getElementById('cover-thumb-fallback');
+  img.style.display = 'none';
+  fallback.style.display = '';
+  document.getElementById('cover-strip-title').textContent = filename.replace(/\.(epub|txt)$/i, '');
+  document.getElementById('cover-strip-author').textContent = '';
+  strip.style.display = 'flex';
+  _resetAtmosphere(); // back to the default room color until a real cover loads
 }
+
+function _applyCoverData(d) {
+  if (d.title) document.getElementById('cover-strip-title').textContent = d.title;
+  if (d.author) document.getElementById('cover-strip-author').textContent = d.author;
+  if (d.cover && d.cover.data) {
+    const img = document.getElementById('cover-img');
+    img.onload = () => _updateAtmosphereFromCover(img);
+    img.src = 'data:' + d.cover.mime + ';base64,' + d.cover.data;
+    img.style.display = '';
+    document.getElementById('cover-thumb-fallback').style.display = 'none';
+  } else {
+    _resetAtmosphere(); // .txt upload, or an EPUB with no embedded cover
+  }
+}
+
+// ─── Atmosphere — the room takes its color from whatever book is loaded ───────
+// Same idea as Apple Music's Now Playing background: sample the cover on an
+// offscreen canvas (cheap — downsampled to 48x48 first) and turn its most
+// prominent hue(s) into the glow behind the whole page. Raw photo pixels are
+// rarely vivid enough to use directly, so only the *hue* is taken from the
+// image; saturation/lightness are pinned to values already tuned to look
+// good against the glass panels and text, regardless of source image.
+function _setAtmosphere(hueA, hueB) {
+  const root = document.documentElement.style;
+  root.setProperty('--atmo-a', 'hsl(' + hueA + ' 70% 58%)');
+  root.setProperty('--atmo-b', 'hsl(' + hueB + ' 55% 42%)');
+  root.setProperty('--atmo-c', 'hsl(' + hueA + ' 35% 16%)');
+  // Buttons, toggles, and badges don't crossfade the way the backdrop does —
+  // they're small, high-contrast surfaces where an instant color swap reads
+  // as "updated," not "broken," so a single --hue-a write is enough: every
+  // --accent* token in style.css is a hsl(var(--hue-a) ...) formula, not a
+  // literal, and recomputes on its own the moment this changes.
+  root.setProperty('--hue-a', hueA);
+  root.setProperty('--hue-b', hueB);
+}
+
+function _resetAtmosphere() {
+  const root = document.documentElement.style;
+  root.removeProperty('--atmo-a');
+  root.removeProperty('--atmo-b');
+  root.removeProperty('--atmo-c');
+  root.removeProperty('--hue-a');
+  root.removeProperty('--hue-b');
+}
+
+function _updateAtmosphereFromCover(imgEl) {
+  try {
+    const size = 48;
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(imgEl, 0, 0, size, size);
+    const { data } = ctx.getImageData(0, 0, size, size);
+
+    // Bucket pixels into 24 hue buckets (15° each), weighted by saturation
+    // so vivid pixels count more than washed-out ones. Near-grey/near-black/
+    // near-white pixels carry no usable hue and are skipped entirely.
+    const buckets = new Array(24).fill(0);
+    let vividCount = 0, total = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      total++;
+      const r = data[i] / 255, g = data[i + 1] / 255, b = data[i + 2] / 255;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      const l = (max + min) / 2, d = max - min;
+      if (d < 0.06 || l < 0.08 || l > 0.94) continue;
+      const s = d / (1 - Math.abs(2 * l - 1));
+      if (s < 0.15) continue;
+      let h;
+      if (max === r) h = ((g - b) / d) % 6;
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h = Math.round(h * 60);
+      if (h < 0) h += 360;
+      buckets[Math.floor(h / 15) % 24] += s;
+      vividCount++;
+    }
+
+    // A mostly black-and-white or monochrome cover has no real hue signal —
+    // fall back to the default room color instead of a meaningless one.
+    if (vividCount < total * 0.06) { _resetAtmosphere(); return; }
+
+    let primaryIdx = 0;
+    for (let i = 1; i < 24; i++) if (buckets[i] > buckets[primaryIdx]) primaryIdx = i;
+    // Secondary hue = the strongest bucket at least 60° away from the
+    // primary, so the two glows read as genuinely different colors instead
+    // of near-duplicates of the same hue.
+    let secondaryIdx = -1;
+    for (let i = 0; i < 24; i++) {
+      if (buckets[i] <= 0) continue; // bucket has no actual pixels — not a real candidate
+      const dist = Math.min(Math.abs(i - primaryIdx), 24 - Math.abs(i - primaryIdx));
+      if (dist >= 4 && (secondaryIdx === -1 || buckets[i] > buckets[secondaryIdx])) secondaryIdx = i;
+    }
+    const hueA = primaryIdx * 15 + 7;
+    const hueB = secondaryIdx === -1 ? (hueA + 45) % 360 : secondaryIdx * 15 + 7;
+    _setAtmosphere(hueA, hueB);
+  } catch (e) {
+    console.warn('Cover color extraction skipped:', e);
+  }
+}
+
 
 function fmtBytes(b) {
   if (b < 1024)    return b + ' B';
@@ -162,6 +273,7 @@ async function fetchChapters(file) {
     const d = await r.json();
     _chaptersData = d.chapters;
     _renderChapters(d.chapters);
+    _applyCoverData(d);
     tools.style.display = 'flex';
   } catch(e) {
     console.error('fetchChapters error:', e);
@@ -377,12 +489,60 @@ function updateLlmSettingsVisibility() {
 // ─── TTS Engine toggle ────────────────────────────────────────────────────────
 const ENGINE_WARNINGS = {
   higgs: 'Uses ~12GB RAM and runs roughly at realtime speed. Licensed under Boson AI\'s Community License (not Apache/MIT) — requires attribution and a commercial license above 100k annual active users.',
-  chatterbox: 'Runs CPU-only in this app (a memory-safety fix, not a setting) — expect roughly 6x the audiobook\'s runtime in processing time.',
+  chatterbox: 'Uses your Device setting. CPU is slow (~6x the audiobook\'s runtime) but stable. MPS (Apple Silicon GPU) has a confirmed memory leak that can spike past 70GB+ RAM inside a single chunk\'s generation — CPU is strongly recommended unless you know that risk and are watching memory closely.',
 };
+
+// Plain-language voice-mode cards proxy the real #engine select: they set
+// its value and fire a native 'change' event so toggleEngine() (bound via
+// the select's own onchange) runs exactly as if the user had picked from
+// the dropdown. Keeps the select as the single source of truth.
+//
+// "Use a Voice" always means Kokoro. "Clone a Voice" means one of the two
+// cloning engines — whichever was last selected (defaulting to Higgs,
+// since it doesn't carry Chatterbox's MPS memory-leak risk) — with the
+// actual engine name tucked behind the small "Advanced" picker below,
+// never shown as the primary choice.
+const DEFAULT_CLONE_ENGINE = 'higgs';
+
+function pickVoiceMode(mode) {
+  const sel = document.getElementById('engine');
+  if (mode === 'existing') {
+    if (sel.value === 'kokoro') return;
+    sel.value = 'kokoro';
+  } else {
+    if (sel.value !== 'kokoro') return; // already on a cloning engine
+    sel.value = DEFAULT_CLONE_ENGINE;
+  }
+  sel.dispatchEvent(new Event('change'));
+}
+
+// The rare override for someone who wants to pick Higgs vs. Chatterbox
+// specifically, reached only via the small "Advanced" link in the clone panel.
+function pickCloneModel(name) {
+  const sel = document.getElementById('engine');
+  if (sel.value === name) return;
+  sel.value = name;
+  sel.dispatchEvent(new Event('change'));
+}
+
+function toggleCloneModelPicker() {
+  const picker = document.getElementById('clone-model-picker');
+  picker.style.display = picker.style.display === 'none' ? 'flex' : 'none';
+}
 
 function toggleEngine() {
   const engine = document.getElementById('engine').value;
   const isKokoro = engine === 'kokoro';
+
+  const existingBtn = document.getElementById('vc-existing-btn');
+  const cloneBtn = document.getElementById('vc-clone-btn');
+  existingBtn.classList.toggle('active', isKokoro);
+  existingBtn.setAttribute('aria-pressed', isKokoro ? 'true' : 'false');
+  cloneBtn.classList.toggle('active', !isKokoro);
+  cloneBtn.setAttribute('aria-pressed', !isKokoro ? 'true' : 'false');
+  document.querySelectorAll('.mini-seg-opt').forEach(b => {
+    b.classList.toggle('active', b.dataset.model === engine);
+  });
 
   document.getElementById('kokoro-voice-field').style.display = isKokoro ? '' : 'none';
   document.getElementById('engine-settings').style.display = isKokoro ? 'none' : 'block';
@@ -405,6 +565,7 @@ function toggleEngine() {
   document.getElementById('higgs-temperature-field').style.display = showHiggsSampling ? 'block' : 'none';
   document.getElementById('higgs-top-p-field').style.display       = showHiggsSampling ? 'block' : 'none';
   document.getElementById('higgs-top-k-field').style.display       = showHiggsSampling ? 'block' : 'none';
+  document.getElementById('higgs-workers-field').style.display     = showHiggsSampling ? 'block' : 'none';
 
   if (showWorkers || showHiggsSampling) {
     const advBtn  = document.getElementById('adv-btn');
@@ -441,7 +602,7 @@ function toggleEngine() {
 // ─── Preview & Tweak ────────────────────────────────────────────────────────────
 // The "listen before you run" flow for every engine, backed by the same job/SSE
 // machinery as a real conversion: POST /api/preview-job runs one synthetic
-// "chapter" (backend/voices.py SAMPLE_TEXT) through the real ChapterProcessor
+// "chapter" (backend/voices.py PREVIEW_JOB_TEXT) through the real ChapterProcessor
 // (backend/pipeline.py run_preview_job), then GET /api/stream/{job_id} — the
 // exact endpoint a real conversion streams from — reports real chunk-by-chunk
 // progress and logs. That's also what makes Multi-voice/Ambient sound actually
@@ -539,14 +700,23 @@ async function previewSample() {
     }
     if (multiVoice) { fd.append('multi_voice', 'true'); desc += ' · multi-voice=on'; }
     if (ambience)   { fd.append('ambience', 'true');    desc += ' · ambience=on'; }
+    const kWorkers = document.getElementById('kokoro_workers').value || '1';
+    if (kWorkers > 1) { fd.append('kokoro_workers', kWorkers); desc += ' · workers=' + kWorkers; }
   } else {
     const refInput = document.getElementById('reference_audio');
     if (!refInput.files || !refInput.files.length) {
       toast('Upload a reference voice clip first'); return;
     }
     fd.append('reference_audio', refInput.files[0]);
-    let device = document.getElementById('device').value;
-    if (device === 'auto') device = 'cpu';
+    // Send the raw dropdown value (including 'auto') and let the backend
+    // resolve it, same as the main Convert form (app.js line ~728) — the
+    // /api/preview-job route already does proper mps/cuda/cpu detection
+    // (backend/routes/preview.py). Forcing 'cpu' here used to silently run
+    // both engines on CPU instead of MPS/CUDA even when the user picked
+    // Auto — for Higgs that's just unnecessarily slow; for Chatterbox, MPS
+    // carries a confirmed memory-leak risk (see ENGINE_WARNINGS above), so
+    // whichever device this resolves to is now a real, visible choice.
+    const device = document.getElementById('device').value;
     fd.append('device', device);
     desc += ' · device=' + device;
 
@@ -555,20 +725,26 @@ async function previewSample() {
       const cCfg   = document.getElementById('chatterbox_cfg_weight').value || '0.3';
       const cExag  = document.getElementById('chatterbox_exaggeration').value || '0.7';
       const cTemp  = document.getElementById('chatterbox_temperature').value || '0.8';
+      const cWorkers = document.getElementById('chatterbox_workers').value || '1';
       fd.append('chatterbox_speed', cSpeed);
       fd.append('chatterbox_cfg_weight',   cCfg);
       fd.append('chatterbox_exaggeration', cExag);
       fd.append('chatterbox_temperature',  cTemp);
+      fd.append('chatterbox_workers', cWorkers);
       desc += ' · speed=' + cSpeed + ' · cfg=' + cCfg + ' · exaggeration=' + cExag + ' · temperature=' + cTemp;
+      if (cWorkers > 1) desc += ' · workers=' + cWorkers;
     }
     if (engine === 'higgs') {
-      const hTemp = document.getElementById('higgs_temperature').value || '0.3';
-      const hTopP = document.getElementById('higgs_top_p').value || '0.95';
-      const hTopK = document.getElementById('higgs_top_k').value || '50';
+      const hTemp = document.getElementById('higgs_temperature').value || '0.15';
+      const hTopP = document.getElementById('higgs_top_p').value || '0.75';
+      const hTopK = document.getElementById('higgs_top_k').value || '25';
+      const hWorkers = document.getElementById('higgs_workers').value || '1';
       fd.append('higgs_temperature', hTemp);
       fd.append('higgs_top_p', hTopP);
       fd.append('higgs_top_k', hTopK);
+      fd.append('higgs_workers', hWorkers);
       desc += ' · temperature=' + hTemp + ' · top_p=' + hTopP + ' · top_k=' + hTopK;
+      if (hWorkers > 1) desc += ' · workers=' + hWorkers;
     }
 
     // Ambient sound applies regardless of engine in the real conversion (see
@@ -685,6 +861,218 @@ function _connectSampleStream(jobId, desc) {
   };
 }
 
+// ─── Auto-tune this voice ───────────────────────────────────────────────────────
+// Opt-in (button, not automatic on upload): samples a handful of Chatterbox/
+// Higgs parameter combos via Latin Hypercube Sampling, synthesizes the same
+// short sample text with each against the uploaded reference clip in
+// parallel, scores every candidate with DNSMOS (backend/voice_tuning.py),
+// and reports the ranked results. Same job/SSE machinery as Preview & Tweak.
+let _autotuneJobId = null;
+let _autotuneEventSource = null;
+let _autotuneLiveCandidates = [];   // accumulated as autotune_candidate_result messages arrive
+
+function _autotuneLog(text, cls) {
+  const log     = document.getElementById('autotune-log');
+  const wrap    = document.getElementById('autotune-log-wrap');
+  wrap.style.display = 'block';
+  const line = document.createElement('div');
+  line.className = 'sl-line' + (cls ? ' ' + cls : '');
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  line.textContent = '[' + time + '] ' + text;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function _setAutotuneRunning(running) {
+  document.getElementById('autotune-btn').disabled = running;
+  document.getElementById('autotune-stop-btn').style.display = running ? 'inline-flex' : 'none';
+  document.getElementById('autotune-prog-track').style.display = running ? 'block' : 'none';
+  if (running) {
+    document.getElementById('autotune-results').style.display = 'none';
+    _autotuneLiveCandidates = [];
+  }
+}
+
+async function startAutotune() {
+  const engine = document.getElementById('engine').value;
+  if (engine !== 'chatterbox' && engine !== 'higgs') {
+    toast('Auto-tune only applies to Chatterbox/Higgs — switch engine first'); return;
+  }
+  const refInput = document.getElementById('reference_audio');
+  if (!refInput.files || !refInput.files.length) {
+    toast('Upload a reference voice clip first'); return;
+  }
+
+  const fd = new FormData();
+  fd.append('engine', engine);
+  fd.append('reference_audio', refInput.files[0]);
+  let device = document.getElementById('device').value;
+  fd.append('device', device);
+  if (engine === 'chatterbox') {
+    fd.append('chatterbox_workers', document.getElementById('chatterbox_workers').value || '1');
+  } else {
+    fd.append('higgs_workers', document.getElementById('higgs_workers').value || '1');
+  }
+
+  _setAutotuneRunning(true);
+  document.getElementById('autotune-status').textContent = 'Starting…';
+  _autotuneLog('Started — ' + engine + ' · device=' + device, 'sl-start');
+
+  let jobId;
+  try {
+    const r = await fetch('/api/autotune-job', { method: 'POST', body: fd });
+    if (!r.ok) {
+      let detail = '';
+      try { detail = (await r.json()).detail || ''; } catch(_) {}
+      throw new Error(detail || ('HTTP ' + r.status));
+    }
+    const d = await r.json();
+    jobId = d.job_id;
+  } catch (e) {
+    document.getElementById('autotune-status').textContent = 'Auto-tune failed: ' + e.message;
+    _autotuneLog('Failed: ' + e.message, 'sl-err');
+    _setAutotuneRunning(false);
+    return;
+  }
+
+  _autotuneJobId = jobId;
+  _connectAutotuneStream(jobId, engine);
+}
+
+function stopAutotune() {
+  if (!_autotuneJobId) return;
+  const jobId = _autotuneJobId;
+  _autotuneJobId = null;
+  fetch('/api/stop/' + jobId, { method: 'POST' }).catch(() => {});
+  if (_autotuneEventSource) { _autotuneEventSource.close(); _autotuneEventSource = null; }
+  document.getElementById('autotune-status').textContent = 'Stopped.';
+  _autotuneLog('Stopped by user', 'sl-stop');
+  _setAutotuneRunning(false);
+}
+
+function _connectAutotuneStream(jobId, engine) {
+  const status = document.getElementById('autotune-status');
+  const fill   = document.getElementById('autotune-prog-fill');
+  let totalCandidates = 0;
+
+  if (_autotuneEventSource) _autotuneEventSource.close();
+  const es = new EventSource('/api/stream/' + jobId);
+  _autotuneEventSource = es;
+
+  es.onmessage = e => {
+    let m;
+    try { m = JSON.parse(e.data); } catch(_) { return; }
+
+    if (m.type === 'log') {
+      const line = m.msg.trim();
+      if (line) _autotuneLog(line);
+    } else if (m.type === 'status') {
+      status.textContent = m.msg;
+    } else if (m.type === 'ch_start') {
+      totalCandidates = m.chunks || 0;
+    } else if (m.type === 'ch_prog') {
+      const pct = Math.round((m.pct || 0) * 100);
+      const doneN = totalCandidates ? Math.round((m.pct || 0) * totalCandidates) : 0;
+      status.textContent = totalCandidates
+        ? 'Synthesizing — ' + doneN + '/' + totalCandidates + ' candidates (' + pct + '%)…'
+        : 'Synthesizing — ' + pct + '%…';
+    } else if (m.type === 'autotune_candidate_result') {
+      _autotuneLiveCandidates.push({ params: m.params, score: m.score, filename: m.filename });
+      _renderAutotuneCandidates(_autotuneLiveCandidates, m.best_score, jobId, engine, /*live=*/true);
+      status.textContent = 'Synthesizing — ' + _autotuneLiveCandidates.length + '/' +
+        (totalCandidates || '?') + ' candidates · best so far ' + m.best_score.toFixed(2) + '…';
+    } else if (m.type === 'autotune_result') {
+      _renderAutotuneCandidates(m.candidates, m.winner.score, jobId, engine, /*live=*/false);
+      _applyAutotuneParams(m.winner.params, engine);
+      toast('Auto-tune done — best-scoring settings applied (score ' + m.winner.score.toFixed(2) + ')');
+    } else if (m.type === 'done') {
+      if (_autotuneEventSource) { _autotuneEventSource.close(); _autotuneEventSource = null; }
+      _autotuneJobId = null;
+      status.textContent = 'Done.';
+      _autotuneLog('Done', 'sl-done');
+      _setAutotuneRunning(false);
+    }
+  };
+
+  es.onerror = () => {
+    if (_autotuneJobId === jobId) {
+      _autotuneJobId = null;
+      status.textContent = 'Auto-tune failed: connection lost.';
+      _autotuneLog('Failed: connection lost', 'sl-err');
+    }
+    if (_autotuneEventSource) { _autotuneEventSource.close(); _autotuneEventSource = null; }
+    _setAutotuneRunning(false);
+  };
+}
+
+// Renders the results panel from whatever candidates have scored so far —
+// called both incrementally (live=true, as each autotune_candidate_result
+// streams in — the list grows and the ranking/BEST badge can reshuffle
+// candidate to candidate) and once authoritatively at the end (live=false,
+// from the final autotune_result, which also auto-fills the winner's
+// settings). Sorts every call, so the DOM always reflects current ranking
+// regardless of the (out-of-order, worker-dependent) arrival order.
+function _renderAutotuneCandidates(candidates, bestScore, jobId, engine, live) {
+  const box = document.getElementById('autotune-results');
+  box.innerHTML = '';
+  box.style.display = 'block';
+
+  const sorted = [...candidates].sort((a, b) => b.score - a.score);
+
+  const heading = document.createElement('div');
+  heading.style.cssText = 'font-size:.73rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-s);margin-bottom:8px';
+  heading.textContent = live
+    ? 'Results so far (' + sorted.length + ' scored, still running) — ranked by predicted naturalness'
+    : 'Results — ranked by predicted naturalness';
+  box.appendChild(heading);
+
+  sorted.forEach((c, idx) => {
+    const isBest = c.score === bestScore;
+    const card = document.createElement('div');
+    card.style.cssText = 'padding:10px 12px;border-radius:10px;margin-bottom:8px;background:rgba(255,255,255,.03);border:1px solid ' +
+      (isBest ? 'var(--success)' : 'rgba(255,255,255,.06)');
+
+    const paramStr = Object.entries(c.params).map(([k, v]) =>
+      k + '=' + (typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(2)) : v)).join(' · ');
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap';
+    row.innerHTML =
+      '<span style="font-weight:700">#' + (idx + 1) + '</span>' +
+      (isBest ? '<span style="font-size:.65rem;font-weight:800;letter-spacing:.06em;color:var(--success);background:rgba(52,211,153,.12);padding:2px 6px;border-radius:4px">BEST</span>' : '') +
+      '<span style="font-size:.8rem;color:var(--txt-m)">score ' + c.score.toFixed(2) + '</span>' +
+      '<span style="font-size:.73rem;color:var(--txt-s);font-family:monospace">' + paramStr + '</span>';
+    card.appendChild(row);
+
+    const audio = document.createElement('audio');
+    audio.controls = true;
+    audio.style.cssText = 'width:100%;height:32px;margin-top:6px';
+    audio.src = '/api/download/' + jobId + '/' + encodeURIComponent(c.filename);
+    card.appendChild(audio);
+
+    const useBtn = document.createElement('button');
+    useBtn.type = 'button';
+    useBtn.className = 'btn-sm';
+    useBtn.style.marginTop = '6px';
+    useBtn.textContent = (isBest && !live) ? '✓ Use these settings (applied)' : 'Use these settings';
+    useBtn.onclick = () => _applyAutotuneParams(c.params, engine);
+    card.appendChild(useBtn);
+
+    box.appendChild(card);
+  });
+}
+
+function _applyAutotuneParams(params, engine) {
+  if (engine === 'chatterbox') {
+    if ('cfg_weight' in params) document.getElementById('chatterbox_cfg_weight').value = params.cfg_weight.toFixed(2);
+    if ('temperature' in params) document.getElementById('chatterbox_temperature').value = params.temperature.toFixed(2);
+  } else if (engine === 'higgs') {
+    if ('temperature' in params) document.getElementById('higgs_temperature').value = params.temperature.toFixed(2);
+    if ('top_p' in params) document.getElementById('higgs_top_p').value = params.top_p.toFixed(2);
+    if ('top_k' in params) document.getElementById('higgs_top_k').value = Math.round(params.top_k);
+  }
+}
+
 function showReferenceAudio() {
   const input  = document.getElementById('reference_audio');
   const status = document.getElementById('reference-audio-status');
@@ -747,9 +1135,10 @@ async function startJob() {
     fd.append('chatterbox_breaths',      document.getElementById('chatterbox_breaths').checked);
   }
   if (engine === 'higgs') {
-    fd.append('higgs_temperature', document.getElementById('higgs_temperature').value || '0.3');
-    fd.append('higgs_top_p',       document.getElementById('higgs_top_p').value || '0.95');
-    fd.append('higgs_top_k',       document.getElementById('higgs_top_k').value || '50');
+    fd.append('higgs_temperature', document.getElementById('higgs_temperature').value || '0.15');
+    fd.append('higgs_top_p',       document.getElementById('higgs_top_p').value || '0.75');
+    fd.append('higgs_top_k',       document.getElementById('higgs_top_k').value || '25');
+    fd.append('higgs_workers',     document.getElementById('higgs_workers').value || '1');
   }
 
   switchToOutput();

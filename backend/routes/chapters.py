@@ -3,15 +3,25 @@ GET-list-of-chapters route.
 
 POST /chapters — parse an uploaded EPUB/.txt and return its chapter titles
                   + char counts, so the UI can offer chapter selection before
-                  a conversion actually starts.
+                  a conversion actually starts. Also returns title/author/cover
+                  when available (EPUB only) — the same metadata the convert
+                  pipeline already extracts for MP3 tagging, surfaced here so
+                  the setup screen can show the actual book instead of just a
+                  filename.
 """
+import base64
 import os
 import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from backend.epub_parser import extract_chapters, extract_chapters_from_text
+from backend.epub_parser import (
+    _find_epub_cover,
+    extract_chapters,
+    extract_chapters_from_text,
+    get_book_metadata,
+)
 
 router = APIRouter()
 
@@ -46,11 +56,24 @@ async def list_chapters(
             tmp_path = tmp.name
         book     = epub.read_epub(tmp_path)
         chapters = extract_chapters(book, min_ch_len)
+        meta     = get_book_metadata(book)
+
+        cover = None
+        try:
+            cover_data, cover_mime = _find_epub_cover(book)
+            if cover_data:
+                cover = {"mime": cover_mime, "data": base64.b64encode(cover_data).decode("ascii")}
+        except Exception:
+            pass  # Cover art is a nice-to-have for the preview — never block chapter listing on it.
+
         return {
             "chapters": [
                 {"index": index, "title": title, "chars": len(text)}
                 for index, (title, text) in enumerate(chapters)
-            ]
+            ],
+            "title":  meta.get("title", ""),
+            "author": meta.get("author", ""),
+            "cover":  cover,
         }
     except Exception as error:
         raise HTTPException(status_code=500, detail=str(error))
