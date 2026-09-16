@@ -13,7 +13,7 @@ POST /preview-job                — the Preview & Tweak card's real synthesis:
                                     ChapterProcessor pipeline (Kokoro, Higgs,
                                     or Chatterbox; Multi-voice/Ambient sound
                                     included when checked) for one synthetic
-                                    "chapter" — SAMPLE_TEXT. Returns a job_id
+                                    "chapter" — PREVIEW_JOB_TEXT. Returns a job_id
                                     that behaves exactly like a real
                                     conversion's: routes/convert.py's
                                     /stream/{id} (chunk-by-chunk progress +
@@ -22,6 +22,7 @@ POST /preview-job                — the Preview & Tweak card's real synthesis:
 """
 import asyncio
 import io
+import os
 import tempfile
 import threading
 import uuid
@@ -76,19 +77,25 @@ async def start_preview_job(
     ollama_url:      str   = Form("http://localhost:11434"),
     ollama_model:    str   = Form("phi3:mini"),
     reference_audio: UploadFile | None = File(None),  # required for higgs/chatterbox
+    kokoro_workers:           int   = Form(1),
+    chatterbox_workers:       int   = Form(1),
     chatterbox_speed:        float = Form(1.0),
     chatterbox_cfg_weight:   float = Form(0.3),
     chatterbox_exaggeration: float = Form(0.7),
     chatterbox_temperature:  float = Form(0.8),
-    higgs_temperature:       float = Form(0.3),
-    higgs_top_p:             float = Form(0.95),
-    higgs_top_k:             int   = Form(50),
+    higgs_temperature:       float = Form(0.15),
+    higgs_top_p:             float = Form(0.75),
+    higgs_top_k:             int   = Form(25),
+    higgs_workers:           int   = Form(1),
 ):
     if engine not in ("kokoro", "higgs", "chatterbox"):
         raise HTTPException(400, f"Unknown engine: {engine}")
 
     multi_voice_bool = multi_voice.lower() == "true"
     ambience_bool    = ambience.lower() == "true"
+    kokoro_workers      = max(1, min(kokoro_workers, os.cpu_count() or 1))
+    chatterbox_workers  = max(1, min(chatterbox_workers, 16))
+    higgs_workers       = max(1, min(higgs_workers, 4))  # see cap reasoning in routes/convert.py
 
     if engine != "kokoro":
         if multi_voice_bool:
@@ -166,7 +173,8 @@ async def start_preview_job(
         "ollama_url":    ollama_url.strip() or "http://localhost:11434",
         "ollama_model":  ollama_model.strip() or "phi3:mini",
         "chunk_size":    500,
-        "chatterbox_workers":     1,
+        "kokoro_workers":         kokoro_workers,
+        "chatterbox_workers":     chatterbox_workers,
         "chatterbox_speed":       chatterbox_speed,
         "chatterbox_cfg_weight":  chatterbox_cfg_weight,
         "chatterbox_exaggeration": chatterbox_exaggeration,
@@ -175,6 +183,7 @@ async def start_preview_job(
         "higgs_temperature": higgs_temperature,
         "higgs_top_p":       higgs_top_p,
         "higgs_top_k":       higgs_top_k,
+        "higgs_workers":     higgs_workers,
         "enhance":       False,
         "output_format": "wav",
         "bitrate":       192,

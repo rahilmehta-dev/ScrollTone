@@ -37,17 +37,15 @@ print('Kokoro model cached OK'); \
 del p"
 
 # ── Copy application ──────────────────────────────────────────────────────────
-# generate_previews.py only needs app.py/backend/ (it imports backend.voices
-# for the shared sample text) — copy just that much and run it before
-# frontend/ and the rest of scripts/, so editing the UI doesn't bust the
-# cache on this step (~5-10 min: re-synthesizes all 20 voices).
+# Voice preview clips are no longer pre-baked at build time (that step —
+# scripts/generate_previews.py — took ~5-10 min re-synthesizing all 20
+# voices on every build). Previews now generate lazily on first request per
+# voice instead, cached to PREVIEW_DIR for the rest of that container's
+# lifetime — see the fallback in backend/routes/preview.py's GET
+# /preview/{voice}. Run scripts/generate_previews.py manually inside the
+# container if you want instant first-click playback for every voice.
 COPY app.py .
 COPY backend/ backend/
-COPY scripts/generate_previews.py scripts/generate_previews.py
-
-# Pre-generate voice preview samples for all 20 voices (~10 MB, instant playback in UI)
-RUN python scripts/generate_previews.py
-
 COPY frontend/ frontend/
 COPY scripts/ scripts/
 

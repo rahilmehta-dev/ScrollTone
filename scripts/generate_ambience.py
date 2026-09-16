@@ -1,13 +1,14 @@
 """
-Procedurally synthesizes the bundled ambient background loops.
+Procedurally synthesizes the still-synthetic bundled ambient background loops.
 
-ScrollTone's premise is fully local and Dockerized. Pulling ambient sound
-clips from a live API (e.g. Freesound) at generation time would break that,
-and bundling real third-party recordings would mean tracking a license per
-clip. Instead, each loop below is synthesized from scratch with plain DSP
-(shaped noise + periodic modulation) directly into backend/assets/ambience/
--- there is no third-party asset involved and nothing to license. See
-documentation/ambience.md for the full rationale.
+rain/ocean/fire/clock were originally synthesized here too, but are now real
+recordings pulled in by scripts/fetch_ambience.py instead (see
+documentation/ambience.md for why: procedural noise was cheap to license but
+sounded harsh and un-atmospheric against narration). wind/forest/crowd
+remain synthesized below because no equivalently well-licensed real
+recording has been sourced for them yet -- see documentation/ambience.md for
+the current gap list. Running this script only ever touches the categories
+in GENERATORS below; it will not overwrite the real recordings.
 
 Every generator builds its loop directly in the frequency domain (random
 phase per FFT bin, then a single inverse FFT into a fixed-length buffer).
@@ -30,7 +31,7 @@ DURATION_SEC = 24
 N            = SAMPLE_RATE * DURATION_SEC
 OUT_DIR      = Path(__file__).parent.parent / "backend" / "assets" / "ambience"
 
-_SEEDS = {"rain": 1, "wind": 2, "ocean": 3, "fire": 4, "forest": 5, "crowd": 6}
+_SEEDS = {"wind": 2, "forest": 5, "crowd": 6}
 
 
 # ── Building blocks (all exactly periodic over N samples) ─────────────────────
@@ -71,26 +72,6 @@ def _periodic_envelope(n: int, cycles: int, rng: np.random.Generator, base: floa
     return base + depth * wave01
 
 
-def _circular_impulse_texture(
-    n: int, rng: np.random.Generator, rate_per_sec: float, decay_sec: float, amp_range: tuple[float, float]
-) -> np.ndarray:
-    """Sparse random impulses circularly convolved with an exponential-decay kernel.
-
-    Circular convolution (FFT multiply) of two periodic-N signals stays
-    periodic-N, so this stays seamlessly loopable even though the impulse
-    positions are random.
-    """
-    impulses = np.zeros(n, dtype=np.float64)
-    count = int(rate_per_sec * n / SAMPLE_RATE)
-    for pos in rng.integers(0, n, size=count):
-        impulses[pos] += rng.uniform(*amp_range)
-    decay_len = int(decay_sec * SAMPLE_RATE)
-    kernel = np.zeros(n, dtype=np.float64)
-    kernel[:decay_len] = np.exp(-np.linspace(0, 6, decay_len))
-    out = np.fft.irfft(np.fft.rfft(impulses) * np.fft.rfft(kernel), n=n)
-    return _peak_normalize(out, 1.0)
-
-
 def _chirp_kernel(rng: np.random.Generator, dur_sec: float = 0.25) -> np.ndarray:
     n = int(dur_sec * SAMPLE_RATE)
     f0, f1 = rng.uniform(1800, 2500), rng.uniform(3000, 4500)
@@ -106,32 +87,11 @@ def _peak_normalize(signal: np.ndarray, peak: float) -> np.ndarray:
 
 # ── Per-category generators ────────────────────────────────────────────────────
 
-def gen_rain(rng: np.random.Generator) -> np.ndarray:
-    hiss     = _band_limit(_seamless_noise(N, 0.5, rng), 300, 10000)
-    droplets = _band_limit(_circular_impulse_texture(N, rng, 120, 0.015, (0.3, 1.0)), 1000, 11000)
-    return _peak_normalize(0.6 * hiss + 0.5 * droplets, 0.5)
-
-
 def gen_wind(rng: np.random.Generator) -> np.ndarray:
     base = _band_limit(_seamless_noise(N, 1.6, rng), 40, 1800)
     gust = _periodic_envelope(N, cycles=3, rng=rng, base=0.5, depth=0.5)
     flutter = _periodic_envelope(N, cycles=7, rng=rng, base=1.0, depth=0.15)
     return _peak_normalize(base * gust * flutter, 0.5)
-
-
-def gen_ocean(rng: np.random.Generator) -> np.ndarray:
-    rumble   = _band_limit(_seamless_noise(N, 2.0, rng), 20, 400)
-    foam     = _band_limit(_seamless_noise(N, 0.3, rng), 800, 9000)
-    swell    = _periodic_envelope(N, cycles=5, rng=rng, base=0.4, depth=0.6)
-    foam_env = _periodic_envelope(N, cycles=5, rng=rng, base=0.3, depth=0.5)
-    mix = rumble * 0.8 + foam * foam_env * 0.6
-    return _peak_normalize(mix * (0.5 + 0.5 * swell), 0.5)
-
-
-def gen_fire(rng: np.random.Generator) -> np.ndarray:
-    hiss    = _band_limit(_seamless_noise(N, 1.0, rng), 200, 6000)
-    crackle = _band_limit(_circular_impulse_texture(N, rng, 25, 0.008, (0.4, 1.0)), 800, 9000)
-    return _peak_normalize(hiss * 0.5 + crackle * 0.7, 0.45)
 
 
 def gen_forest(rng: np.random.Generator) -> np.ndarray:
@@ -159,10 +119,7 @@ def gen_crowd(rng: np.random.Generator) -> np.ndarray:
 
 
 GENERATORS = {
-    "rain":   gen_rain,
     "wind":   gen_wind,
-    "ocean":  gen_ocean,
-    "fire":   gen_fire,
     "forest": gen_forest,
     "crowd":  gen_crowd,
 }

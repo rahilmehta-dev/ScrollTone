@@ -22,7 +22,7 @@ from backend.epub_parser import (
     get_book_metadata,
 )
 from backend.audio import write_wav, to_mp3, enhance_wav, change_tempo
-from backend.voices import VoiceMapper, REGISTRY_FILENAME, SAMPLE_TEXT
+from backend.voices import VoiceMapper, REGISTRY_FILENAME, PREVIEW_JOB_TEXT
 from backend.job_events import JobEmitter
 from backend.chapter_processor import ChapterProcessor
 
@@ -81,7 +81,8 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
             memlog("after pipeline loaded")
             log(f"Model ready  |  voice={settings['voice']}  speed={settings['speed']:.2f}×\n")
         else:
-            workers = settings.get("chatterbox_workers", 1) if engine == "chatterbox" else 1
+            workers_key = f"{engine}_workers"
+            workers = settings.get(workers_key, 1) if engine in ("chatterbox", "higgs") else 1
             worker_note = f"  |  {workers} parallel workers" if workers > 1 else ""
             log(f"Engine: {engine}  |  reference={Path(settings['reference_wav']).name}{worker_note}\n")
             for warning in settings.get("reference_warnings", []):
@@ -260,7 +261,7 @@ def run_preview_job(job_state: dict, settings: dict, loop: asyncio.AbstractEvent
     """Preview & Tweak's synthesis job — same job/SSE machinery as
     convert_book() (routes/convert.py's /stream, /stop, /download all work
     unchanged on the job_id this produces), but for one synthetic "chapter":
-    backend/voices.py SAMPLE_TEXT, instead of a real uploaded book.
+    backend/voices.py PREVIEW_JOB_TEXT, instead of a real uploaded book.
 
     This is what lets the preview exercise Multi-voice/Ambient sound exactly
     as a real conversion would (same ChapterProcessor, same Ollama calls),
@@ -290,7 +291,10 @@ def run_preview_job(job_state: dict, settings: dict, loop: asyncio.AbstractEvent
                 pipeline = state._preview_pipeline[lang]
             log(f"Model ready  |  voice={settings['voice']}  speed={settings['speed']:.2f}×\n")
         else:
-            log(f"Engine: {engine}  |  reference={Path(settings['reference_wav']).name}\n")
+            workers_key = f"{engine}_workers"
+            workers = settings.get(workers_key, 1) if engine in ("chatterbox", "higgs") else 1
+            worker_note = f"  |  {workers} parallel workers" if workers > 1 else ""
+            log(f"Engine: {engine}  |  reference={Path(settings['reference_wav']).name}{worker_note}\n")
             for warning in settings.get("reference_warnings", []):
                 log(f"   ! [reference] {warning}")
 
@@ -320,7 +324,7 @@ def run_preview_job(job_state: dict, settings: dict, loop: asyncio.AbstractEvent
         status("Synthesizing preview…")
 
         try:
-            chapter_processor.process(0, "Preview Sample", SAMPLE_TEXT)
+            chapter_processor.process(0, "Preview Sample", PREVIEW_JOB_TEXT)
         except StopIteration:
             log("\nStopped by user.")
             job_state["status"] = "cancelled"

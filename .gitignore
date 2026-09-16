@@ -10,3 +10,4 @@ __pycache__/
 /.venv-chatterbox
 /tests/output
 /audiobook_output
+/.claude/settings.local.json

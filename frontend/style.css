@@ -180,14 +180,13 @@ body{
 /* ── Layout ──────────────────────────────────────────────────────────────── */
 main{
   position:relative;z-index:1;
-  max-width:none;
+  max-width:1200px;margin:0 auto;
   padding:0 32px 32px;
 }
 
-/* ── Desktop: full-width while setting up, two-column once a job is running ── */
+/* ── Desktop: one centered column while setting up, two columns once a
+   job is running (settings alongside live output/progress). ── */
 @media(min-width:960px){
-  /* Book / Voice & Model pages: no job yet, no Output panel to split with —
-     use the full width instead of reserving a column for it. */
   main{ display:block; }
   main.has-job{
     display:grid;
@@ -203,7 +202,6 @@ main{
   }
   .btn-back{ display:none!important; }   /* no panel-switching on desktop */
   #job-banner{ display:none!important; }
-  .adv-grid{ grid-template-columns:repeat(2,1fr); } /* 3-col → 2-col in narrower right panel */
 }
 
 @media(max-width:900px){main{padding:0 16px 24px}.brand{padding:28px 0 22px}.brand-name{font-size:1.5rem}.brand-inset{padding:14px 24px;gap:14px}}
@@ -326,10 +324,12 @@ main{
   box-shadow:inset -4px -4px 10px rgba(255,255,255,.05),inset 5px 5px 16px rgba(0,0,0,.75);
 }
 .upload-zone.has-file{
+  padding:18px 24px;
   box-shadow:inset -3px -3px 7px rgba(255,255,255,.04),
              inset 4px 4px 13px rgba(0,0,0,.72),
              0 0 0 1px rgba(16,185,129,.25);
 }
+.upload-zone.has-file .up-icon{font-size:1.4rem;margin-bottom:5px}
 .up-icon{font-size:2.1rem;margin-bottom:9px;display:block;transition:transform .25s}
 @keyframes iconBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
 .upload-zone:hover .up-icon,.upload-zone.drag-over .up-icon{animation:iconBob .7s ease-in-out infinite}
@@ -399,11 +399,14 @@ select:focus,input[type=number]:focus,input[type=text]:focus{
   box-shadow:var(--r-i),0 0 0 2px hsl(var(--hue-a) 78% 60% / .5);
 }
 select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,30,36)}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+@media(max-width:760px){.grid2{grid-template-columns:1fr}}
 
-/* ── Settings checkboxes in Voice card ──────────────────────────────────── */
+/* ── Settings checkboxes — now inside the narrower half-width Sound card,
+   so a single column (matching the approved design) reads better than the
+   old 2-up grid, which was tuned for the card being full page width. ── */
 .settings-checks{
-  display:grid;grid-template-columns:1fr 1fr;
+  display:grid;grid-template-columns:1fr;
   gap:12px 16px;
   margin-top:4px;
 }
@@ -519,25 +522,23 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 }
 .pill input{display:none}
 
-/* ── Options bar (full-width compact row) ────────────────────────────────── */
+/* ── Options bar — the Output card now lives in the Sound|Output half-width
+   row (see .grid2 in index.html), not full page width, so this stacks its
+   groups vertically instead of laying them out as one long horizontal bar.
+   .opts-sep was a vertical divider between horizontal groups — no longer
+   meaningful in a column layout, so it's hidden rather than restyled. ── */
 .opts-card{ margin-bottom:0; }
 .opts-bar{
-  display:flex;align-items:center;gap:28px;flex-wrap:wrap;
+  display:flex;flex-direction:column;align-items:flex-start;gap:14px;
 }
-.opts-sep{
-  width:1px;height:28px;flex-shrink:0;
-  background:rgba(255,255,255,.07);
-}
-/* Advanced 6-up grid inside expanded section */
+.opts-sep{ display:none; }
+/* Advanced grid — auto-fits 1-2 columns depending on the actual space the
+   Output card has (half the page now, not all of it), instead of a fixed
+   column count tuned for full width. */
 .adv-grid{
   display:grid;
-  grid-template-columns:repeat(3,1fr);
-  gap:22px 28px;
-}
-@media(max-width:700px){
-  .adv-grid{grid-template-columns:1fr}
-  .opts-sep{display:none}
-  .opts-bar{gap:14px}
+  grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:20px 24px;
 }
 
 /* ── Advanced toggle ─────────────────────────────────────────────────────── */

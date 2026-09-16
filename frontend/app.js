@@ -3,6 +3,7 @@ let jobId       = null;
 let eventSource = null;
 let _fileIdx    = 0;  // for staggered file-item entrance animation
 let _jobRunning = false;  // true while any conversion is in progress
+let _serverDevices = ['auto', 'cpu'];  // from /api/config — what this server can actually use
 
 // Batch state (multi-EPUB)
 let batchJobIds = [];
@@ -37,18 +38,8 @@ fetch('/api/config').then(r => r.json()).then(d => {
   // Processing Device — only offer options this server can actually use
   // (e.g. MPS never applies inside a Linux Docker container).
   if (d.devices && d.devices.length) {
-    const DEVICE_LABELS = {
-      auto: 'Auto — best available',
-      cpu:  'CPU only',
-      cuda: 'CUDA GPU',
-      mps:  'Apple Silicon (MPS)',
-    };
-    const deviceSel = document.getElementById('device');
-    if (deviceSel) {
-      deviceSel.innerHTML = d.devices.map(v =>
-        `<option value="${v}"${v === 'auto' ? ' selected' : ''}>${DEVICE_LABELS[v] || v}</option>`
-      ).join('');
-    }
+    _serverDevices = d.devices;
+    _updateDeviceOptions(document.getElementById('engine').value === 'kokoro');
   }
   if (!d.docker) return;
   // The container has no GUI for a native OS dialog, and — more fundamentally
@@ -487,9 +478,12 @@ function updateLlmSettingsVisibility() {
 }
 
 // ─── TTS Engine toggle ────────────────────────────────────────────────────────
+// Higgs Audio V2 support still exists server-side (backend/engines/
+// higgs_synth.py, backend/routes/convert.py etc.) but isn't offered as a
+// choice in this build — Chatterbox is the sole cloning engine. See git
+// history if re-enabling Higgs in the UI.
 const ENGINE_WARNINGS = {
-  higgs: 'Uses ~12GB RAM and runs roughly at realtime speed. Licensed under Boson AI\'s Community License (not Apache/MIT) — requires attribution and a commercial license above 100k annual active users.',
-  chatterbox: 'Uses your Device setting. CPU is slow (~6x the audiobook\'s runtime) but stable. MPS (Apple Silicon GPU) has a confirmed memory leak that can spike past 70GB+ RAM inside a single chunk\'s generation — CPU is strongly recommended unless you know that risk and are watching memory closely.',
+  chatterbox: 'Runs CPU-only in this app (a memory-safety fix, not a setting) — expect roughly 6x the audiobook\'s runtime in processing time.',
 };
 
 // Plain-language voice-mode cards proxy the real #engine select: they set
@@ -497,37 +491,42 @@ const ENGINE_WARNINGS = {
 // the select's own onchange) runs exactly as if the user had picked from
 // the dropdown. Keeps the select as the single source of truth.
 //
-// "Use a Voice" always means Kokoro. "Clone a Voice" means one of the two
-// cloning engines — whichever was last selected (defaulting to Higgs,
-// since it doesn't carry Chatterbox's MPS memory-leak risk) — with the
-// actual engine name tucked behind the small "Advanced" picker below,
-// never shown as the primary choice.
-const DEFAULT_CLONE_ENGINE = 'higgs';
-
+// "Use a Voice" always means Kokoro. "Clone a Voice" always means Chatterbox
+// (the only cloning engine offered in this build).
 function pickVoiceMode(mode) {
   const sel = document.getElementById('engine');
   if (mode === 'existing') {
     if (sel.value === 'kokoro') return;
     sel.value = 'kokoro';
   } else {
-    if (sel.value !== 'kokoro') return; // already on a cloning engine
-    sel.value = DEFAULT_CLONE_ENGINE;
+    if (sel.value === 'chatterbox') return;
+    sel.value = 'chatterbox';
   }
   sel.dispatchEvent(new Event('change'));
 }
 
-// The rare override for someone who wants to pick Higgs vs. Chatterbox
-// specifically, reached only via the small "Advanced" link in the clone panel.
-function pickCloneModel(name) {
-  const sel = document.getElementById('engine');
-  if (sel.value === name) return;
-  sel.value = name;
-  sel.dispatchEvent(new Event('change'));
-}
+const DEVICE_LABELS = {
+  auto: 'Auto — best available',
+  cpu:  'CPU only',
+  cuda: 'CUDA GPU',
+  mps:  'Apple Silicon (MPS)',
+};
 
-function toggleCloneModelPicker() {
-  const picker = document.getElementById('clone-model-picker');
-  picker.style.display = picker.style.display === 'none' ? 'flex' : 'none';
+// Rebuilds the #device dropdown from _serverDevices, dropping GPU options
+// (mps/cuda) whenever a non-Kokoro engine is active — Chatterbox (the only
+// other engine offered in this build) is hardcoded CPU-only regardless of
+// this setting, so showing GPU options for it would just be a confusing
+// no-op. Falls back to 'auto' if the previously selected device got
+// filtered out from under it.
+function _updateDeviceOptions(isKokoro) {
+  const deviceSel = document.getElementById('device');
+  if (!deviceSel) return;
+  const previous = deviceSel.value;
+  const options = isKokoro ? _serverDevices : _serverDevices.filter(v => v === 'auto' || v === 'cpu');
+  deviceSel.innerHTML = options.map(v =>
+    `<option value="${v}"${v === 'auto' ? ' selected' : ''}>${DEVICE_LABELS[v] || v}</option>`
+  ).join('');
+  if (options.includes(previous)) deviceSel.value = previous;
 }
 
 function toggleEngine() {
@@ -540,9 +539,6 @@ function toggleEngine() {
   existingBtn.setAttribute('aria-pressed', isKokoro ? 'true' : 'false');
   cloneBtn.classList.toggle('active', !isKokoro);
   cloneBtn.setAttribute('aria-pressed', !isKokoro ? 'true' : 'false');
-  document.querySelectorAll('.mini-seg-opt').forEach(b => {
-    b.classList.toggle('active', b.dataset.model === engine);
-  });
 
   document.getElementById('kokoro-voice-field').style.display = isKokoro ? '' : 'none';
   document.getElementById('engine-settings').style.display = isKokoro ? 'none' : 'block';
@@ -561,13 +557,13 @@ function toggleEngine() {
   exagField.style.display    = showWorkers ? 'block' : 'none';
   tempField.style.display    = showWorkers ? 'block' : 'none';
   breathsField.style.display = showWorkers ? 'block' : 'none';
-  const showHiggsSampling = engine === 'higgs';
-  document.getElementById('higgs-temperature-field').style.display = showHiggsSampling ? 'block' : 'none';
-  document.getElementById('higgs-top-p-field').style.display       = showHiggsSampling ? 'block' : 'none';
-  document.getElementById('higgs-top-k-field').style.display       = showHiggsSampling ? 'block' : 'none';
-  document.getElementById('higgs-workers-field').style.display     = showHiggsSampling ? 'block' : 'none';
 
-  if (showWorkers || showHiggsSampling) {
+  // MPS/CUDA only ever matter for Kokoro now that Chatterbox (the only
+  // cloning engine offered here) is hardcoded CPU-only — showing them while
+  // Chatterbox is selected would just be a confusing no-op.
+  _updateDeviceOptions(isKokoro);
+
+  if (showWorkers) {
     const advBtn  = document.getElementById('adv-btn');
     const advBody = document.getElementById('adv-body');
     if (advBtn && !advBtn.classList.contains('open')) { advBtn.classList.add('open'); advBody.classList.add('open'); }
@@ -711,11 +707,10 @@ async function previewSample() {
     // Send the raw dropdown value (including 'auto') and let the backend
     // resolve it, same as the main Convert form (app.js line ~728) — the
     // /api/preview-job route already does proper mps/cuda/cpu detection
-    // (backend/routes/preview.py). Forcing 'cpu' here used to silently run
-    // both engines on CPU instead of MPS/CUDA even when the user picked
-    // Auto — for Higgs that's just unnecessarily slow; for Chatterbox, MPS
-    // carries a confirmed memory-leak risk (see ENGINE_WARNINGS above), so
-    // whichever device this resolves to is now a real, visible choice.
+    // (backend/routes/preview.py). Only really matters for Higgs — Chatterbox
+    // hardcodes device="cpu" regardless of what's sent (see
+    // backend/engines/chatterbox_synth.py's module docstring for why), so
+    // this is a no-op for that engine either way.
     const device = document.getElementById('device').value;
     fd.append('device', device);
     desc += ' · device=' + device;
@@ -733,18 +728,6 @@ async function previewSample() {
       fd.append('chatterbox_workers', cWorkers);
       desc += ' · speed=' + cSpeed + ' · cfg=' + cCfg + ' · exaggeration=' + cExag + ' · temperature=' + cTemp;
       if (cWorkers > 1) desc += ' · workers=' + cWorkers;
-    }
-    if (engine === 'higgs') {
-      const hTemp = document.getElementById('higgs_temperature').value || '0.15';
-      const hTopP = document.getElementById('higgs_top_p').value || '0.75';
-      const hTopK = document.getElementById('higgs_top_k').value || '25';
-      const hWorkers = document.getElementById('higgs_workers').value || '1';
-      fd.append('higgs_temperature', hTemp);
-      fd.append('higgs_top_p', hTopP);
-      fd.append('higgs_top_k', hTopK);
-      fd.append('higgs_workers', hWorkers);
-      desc += ' · temperature=' + hTemp + ' · top_p=' + hTopP + ' · top_k=' + hTopK;
-      if (hWorkers > 1) desc += ' · workers=' + hWorkers;
     }
 
     // Ambient sound applies regardless of engine in the real conversion (see
@@ -895,8 +878,8 @@ function _setAutotuneRunning(running) {
 
 async function startAutotune() {
   const engine = document.getElementById('engine').value;
-  if (engine !== 'chatterbox' && engine !== 'higgs') {
-    toast('Auto-tune only applies to Chatterbox/Higgs — switch engine first'); return;
+  if (engine !== 'chatterbox') {
+    toast('Auto-tune only applies to Chatterbox — switch engine first'); return;
   }
   const refInput = document.getElementById('reference_audio');
   if (!refInput.files || !refInput.files.length) {
@@ -908,11 +891,7 @@ async function startAutotune() {
   fd.append('reference_audio', refInput.files[0]);
   let device = document.getElementById('device').value;
   fd.append('device', device);
-  if (engine === 'chatterbox') {
-    fd.append('chatterbox_workers', document.getElementById('chatterbox_workers').value || '1');
-  } else {
-    fd.append('higgs_workers', document.getElementById('higgs_workers').value || '1');
-  }
+  fd.append('chatterbox_workers', document.getElementById('chatterbox_workers').value || '1');
 
   _setAutotuneRunning(true);
   document.getElementById('autotune-status').textContent = 'Starting…';
@@ -1066,10 +1045,6 @@ function _applyAutotuneParams(params, engine) {
   if (engine === 'chatterbox') {
     if ('cfg_weight' in params) document.getElementById('chatterbox_cfg_weight').value = params.cfg_weight.toFixed(2);
     if ('temperature' in params) document.getElementById('chatterbox_temperature').value = params.temperature.toFixed(2);
-  } else if (engine === 'higgs') {
-    if ('temperature' in params) document.getElementById('higgs_temperature').value = params.temperature.toFixed(2);
-    if ('top_p' in params) document.getElementById('higgs_top_p').value = params.top_p.toFixed(2);
-    if ('top_k' in params) document.getElementById('higgs_top_k').value = Math.round(params.top_k);
   }
 }
 
@@ -1133,12 +1108,6 @@ async function startJob() {
     fd.append('chatterbox_exaggeration', document.getElementById('chatterbox_exaggeration').value || '0.7');
     fd.append('chatterbox_temperature',  document.getElementById('chatterbox_temperature').value || '0.8');
     fd.append('chatterbox_breaths',      document.getElementById('chatterbox_breaths').checked);
-  }
-  if (engine === 'higgs') {
-    fd.append('higgs_temperature', document.getElementById('higgs_temperature').value || '0.15');
-    fd.append('higgs_top_p',       document.getElementById('higgs_top_p').value || '0.75');
-    fd.append('higgs_top_k',       document.getElementById('higgs_top_k').value || '25');
-    fd.append('higgs_workers',     document.getElementById('higgs_workers').value || '1');
   }
 
   switchToOutput();

@@ -19,7 +19,7 @@ from backend.attribution import ask_ollama
 # in backend/assets/ambience/ (see documentation/ambience.md) — asking the
 # LLM to only choose from a fixed, backed vocabulary avoids ever landing on a
 # cue with no audio to play.
-AMBIENCE_CATEGORIES = ["rain", "wind", "ocean", "fire", "forest", "crowd"]
+AMBIENCE_CATEGORIES = ["rain", "wind", "ocean", "fire", "forest", "crowd", "clock"]
 
 _MAX_CUES_PER_CHAPTER = 3
 _MIN_CONFIDENCE       = 0.0   # caller (mixing) applies its own threshold; keep all here for debugging
@@ -75,13 +75,17 @@ def detect_ambience_cues(
     Raises ``urllib.error.URLError`` on connection problems.
     """
     prompt = (
-        "Below is a chapter from a novel. Identify moments where the text CLEARLY and "
-        "explicitly establishes one of these ambient background sounds:\n"
+        "Below is a chapter from a novel. Identify moments where the text CLEARLY establishes "
+        "a scene the listener should hear one of these ambient background sounds in:\n"
         + ", ".join(AMBIENCE_CATEGORIES) + ".\n\n"
-        "Be conservative: only tag a category if the text actually describes that sound "
-        "happening (e.g. rain literally falling, wind literally blowing, waves/sea, a fire "
-        "burning, a forest/woods setting, or a crowd of people). Do not tag based on mood, "
-        "metaphor, or a single passing word. Skip anything ambiguous.\n\n"
+        "Tag a category when the scene itself puts the reader there — rain actually falling, "
+        "wind blowing, waves/sea, a fire burning nearby, a forest/woods setting, a crowd of "
+        "people, or a clock audibly ticking in a quiet room. This can come from the scene being "
+        "described through sustained sensory detail (the sound, feel, or setting of it), not "
+        "only one literal keyword — but it must be the scene itself, not a metaphor, a simile, "
+        "or a single passing word unconnected to the surrounding action. Be conservative: skip "
+        "anything ambiguous, and never tag a mood or emotion that isn't actually tied to one of "
+        "these physical sounds being present in the scene.\n\n"
         "For each moment found, respond with ONE line in exactly this format:\n"
         "  category|confidence|quote\n"
         "where confidence is a number from 0 to 1, and quote is a short (5-12 word) excerpt "

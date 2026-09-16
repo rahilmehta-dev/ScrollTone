@@ -17,7 +17,7 @@ import threading
 
 from fastapi import APIRouter
 
-from backend.voices import SAMPLE_TEXT
+from backend.voices import PREVIEW_JOB_TEXT
 
 router = APIRouter()
 
@@ -45,9 +45,11 @@ def config():
 
 @router.get("/sample-text")
 def sample_text():
-    """The shared ~200-word sample used everywhere a voice/engine is
-    previewed, so the UI can display it without duplicating the string."""
-    return {"text": SAMPLE_TEXT}
+    """The text the Preview & Tweak job actually synthesizes (see
+    backend/voices.py PREVIEW_JOB_TEXT), so the UI can display it without
+    duplicating the string — and without showing text longer than what's
+    really spoken."""
+    return {"text": PREVIEW_JOB_TEXT}
 
 
 @router.get("/pick-folder")

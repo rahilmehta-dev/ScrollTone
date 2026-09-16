@@ -43,29 +43,13 @@
   <div class="card">
     <div class="sect"><span class="sect-ico">🧪</span>Reference Voice Clips</div>
     <div style="font-size:.81rem;color:var(--txt-m);line-height:1.55;margin-bottom:14px">
-      Upload several candidate voice clips — Auto-tune samples a handful of Chatterbox/Higgs parameter combos per clip, synthesizes the same short sample text with each, and scores every candidate with an offline audio-quality model (DNSMOS — no human listening needed), so you can compare voice actors/takes side by side instead of tuning one at a time.
+      Upload several candidate voice clips — Auto-tune samples a handful of Chatterbox parameter combos per clip, synthesizes the same short sample text with each, and scores every candidate with an offline audio-quality model (DNSMOS — no human listening needed), so you can compare voice actors/takes side by side instead of tuning one at a time.
     </div>
 
     <div class="field">
       <label>Voice Clips <i class="tip" data-tip="8-20 seconds of clean, single-speaker audio per clip works best; minimum 5s each. Upload 1-8 clips (Cmd/Ctrl-click to select multiple in the file picker).">ⓘ</i></label>
       <input type="file" id="voice-files" accept="audio/*" multiple onchange="onVoiceFilesChange()">
       <div class="lab-file-list" id="voice-file-list"></div>
-    </div>
-
-    <div class="field">
-      <label>Engine <i class="tip" data-tip="Auto-tune only applies to the two voice-cloning engines — Kokoro's built-in voices have no reference clip or continuous sampling params to search.">ⓘ</i></label>
-      <select id="lab-engine" onchange="onLabEngineChange()">
-        <option value="chatterbox" selected>Chatterbox</option>
-        <option value="higgs">Higgs Audio V2</option>
-      </select>
-    </div>
-
-    <div class="field">
-      <label>Processing Device <i class="tip" data-tip="Auto uses the best available device. Chatterbox on MPS (Apple Silicon) has a confirmed memory-leak risk — see documentation/engines.md before choosing it over CPU.">ⓘ</i></label>
-      <select id="lab-device">
-        <option value="auto" selected>Auto — best available</option>
-        <option value="cpu">CPU only</option>
-      </select>
     </div>
 
     <div class="field">
@@ -79,7 +63,7 @@
     </div>
 
     <div class="field">
-      <label id="lab-workers-label">Parallel Workers <i class="tip" data-tip="Runs this many candidates concurrently, each its own model instance. Chatterbox: up to 16, ~6.6GB/worker, CPU-only well-tested. Higgs: up to 4, ~12GB/worker, shares the GPU — less predictable. Leave at 1 to run sequentially (safest, slowest).">ⓘ</i></label>
+      <label id="lab-workers-label">Parallel Workers <i class="tip" data-tip="Runs this many candidates concurrently, each its own Chatterbox model instance — CPU-only, well-tested up to 16. ~6.6GB RAM per worker; leave at 1 to run sequentially (safest, slowest) if you're short on RAM.">ⓘ</i></label>
       <input type="number" id="lab-workers" value="1" min="1" max="16" step="1">
     </div>
 

@@ -24,6 +24,11 @@ import soundfile as sf
 import backend.state as state
 
 PROGRESS_RE = re.compile(r"^##PROGRESS##\s+(\d+)\s+(\d+)\s*$")
+# See backend/engines/_heartbeat.py — higgs_synth.py/chatterbox_synth.py print
+# these periodically during a long silent stretch (model load, one generate()
+# call) so it doesn't look like a hang; matched lines get forwarded to the
+# job log via on_log instead of being discarded like other worker stdout.
+HEARTBEAT_RE = re.compile(r"^##HEARTBEAT##\s+(.*)$")
 
 ENGINE_CONFIG = {
     "higgs": {
@@ -84,6 +89,26 @@ def _split_indices(n: int, num_workers: int) -> list[list[int]]:
     return slices
 
 
+def _safe_call(callback, *args, what: str) -> None:
+    """Invoke a caller-supplied callback, swallowing anything it raises.
+
+    These run on the per-worker stdout reader threads in
+    _synthesize_chapter_parallel(). An exception propagating out of one
+    kills that thread, which is the only thing draining that worker's
+    stdout pipe — the worker then blocks forever on a full pipe and the
+    proc.wait() below never returns, hanging the whole job with no error
+    reported anywhere. A callback failing (e.g. voice_tuning.py's DNSMOS
+    scoring choking on one bad wav) must cost at most that one callback.
+    """
+    if callback is None:
+        return
+    try:
+        callback(*args)
+    except Exception as error:  # noqa: BLE001
+        print(f"[runner] {what} callback failed: {type(error).__name__}: {error}",
+              file=sys.stderr, flush=True)
+
+
 def synthesize_chapter(
     engine: str,
     chunks: list[str],
@@ -93,6 +118,8 @@ def synthesize_chapter(
     stop_check: Callable[[], bool] | None = None,
     extra_config: dict | None = None,
     num_workers: int = 1,
+    on_log: Callable[[str], None] | None = None,
+    on_chunk_done: Callable[[int, Path], None] | None = None,
 ) -> tuple[list[np.ndarray], dict]:
     """Run one chapter's chunks through an alternate engine's subprocess.
 
@@ -101,12 +128,37 @@ def synthesize_chapter(
     sampling temperature. Unrecognized keys are ignored by the worker script,
     so this is safe to pass even for a worker that doesn't use them.
 
+    `extra_config["per_chunk"]`, if present, is a list[dict] the same length
+    as `chunks` — one params override per chunk instead of one shared config
+    for the whole job. Used by backend/voice_tuning.py's auto-tune job, which
+    synthesizes the same sample text N times with N different LHS-sampled
+    parameter sets to score against each other. Handled specially (sliced
+    per worker, not spread like other extra_config keys) and passed to the
+    worker as `chunk_params` in job.json.
+
     `num_workers` > 1 fans the chunk list out across that many concurrent
     subprocesses (each loading its own model instance — RAM scales roughly
     linearly with worker count) instead of one subprocess handling every
     chunk sequentially. Only worth it on CPU-only engines with cores/RAM to
     spare; see chatterbox_synth.py's module docstring for the RAM profile of
     a single worker.
+
+    `on_log`, if given, receives one string per heartbeat tick a worker
+    prints during a long silent stretch (model load, a single generate()
+    call) — see backend/engines/_heartbeat.py. Optional since Kokoro's
+    in-process path and short-chunk engines don't need it.
+
+    `on_chunk_done`, if given, fires as soon as each individual chunk's wav
+    file is written — (global_chunk_index, path_to_wav) — rather than
+    waiting for every chunk in the job to finish. The worker scripts write
+    each chunk's file *before* printing its progress line, so the file is
+    guaranteed to exist by the time this fires. The path points at a
+    temporary location that's deleted once this whole call returns (it's
+    inside the `with tempfile.TemporaryDirectory()` block below/in the
+    parallel path) — the callback must read or copy it immediately if it
+    needs the data past that. Used by backend/voice_tuning.py's auto-tune
+    job to score each candidate as it finishes instead of only after the
+    whole batch completes.
 
     Returns (audio_arrays_in_order, results_dict). audio_arrays may be shorter
     than `chunks` if some failed or a safety abort truncated the run — check
@@ -115,11 +167,19 @@ def synthesize_chapter(
     if num_workers > 1 and len(chunks) > 1:
         return _synthesize_chapter_parallel(
             engine, chunks, reference_wav, device, on_progress, stop_check,
-            extra_config, num_workers,
+            extra_config, num_workers, on_log, on_chunk_done,
         )
 
     py = venv_python(engine)
     script = ENGINE_CONFIG[engine]["script"]
+    # "per_chunk" is a reserved extra_config key (list[dict], one per chunk) —
+    # e.g. voice_tuning.py's auto-tune job uses it to give each "chunk" (the
+    # same sample text, repeated) its own sampling params instead of one
+    # config shared by every chunk. Pulled out here instead of being spread
+    # like other extra_config keys, since the worker scripts read it as
+    # `chunk_params` (per-chunk), not a single top-level scalar.
+    cfg = dict(extra_config or {})
+    per_chunk = cfg.pop("per_chunk", None)
 
     with tempfile.TemporaryDirectory(prefix=f"scrolltone_{engine}_") as tmp_dir:
         tmp_path = Path(tmp_dir)
@@ -130,7 +190,8 @@ def synthesize_chapter(
             "reference_wav": reference_wav,
             "out_dir": str(out_dir),
             "device": device,
-            **(extra_config or {}),
+            **cfg,
+            **({"chunk_params": per_chunk} if per_chunk is not None else {}),
         }))
 
         stderr_path = tmp_path / "stderr.log"
@@ -144,7 +205,20 @@ def synthesize_chapter(
             for line in proc.stdout:
                 match = PROGRESS_RE.match(line)
                 if match:
-                    on_progress(int(match.group(1)), int(match.group(2)))
+                    done_n = int(match.group(1))
+                    _safe_call(on_progress, done_n, int(match.group(2)), what="on_progress")
+                    if on_chunk_done is not None:
+                        # No chunk_indices sent on this (non-parallel) path,
+                        # so the worker default is identity — local index i
+                        # (0-based: done_n - 1) IS the global index.
+                        global_i = done_n - 1
+                        wav_path = out_dir / f"chunk_{global_i:04d}.wav"
+                        if wav_path.exists():
+                            _safe_call(on_chunk_done, global_i, wav_path, what="on_chunk_done")
+                elif on_log is not None:
+                    heartbeat = HEARTBEAT_RE.match(line)
+                    if heartbeat:
+                        _safe_call(on_log, heartbeat.group(1), what="on_log")
                 if stop_check is not None and stop_check():
                     proc.kill()
                     stopped = True
@@ -193,6 +267,8 @@ def _synthesize_chapter_parallel(
     stop_check: Callable[[], bool] | None,
     extra_config: dict | None,
     num_workers: int,
+    on_log: Callable[[str], None] | None = None,
+    on_chunk_done: Callable[[int, Path], None] | None = None,
 ) -> tuple[list[np.ndarray], dict]:
     """Fan `chunks` out across `num_workers` concurrent subprocesses, each
     handling a contiguous slice and loading its own model instance.
@@ -206,6 +282,11 @@ def _synthesize_chapter_parallel(
     script = ENGINE_CONFIG[engine]["script"]
     slices = _split_indices(len(chunks), num_workers)
     total = len(chunks)
+    # See the single-worker path's comment above — "per_chunk" is sliced per
+    # worker by `indices` here (unlike the rest of extra_config, which is
+    # identical across every worker) since it's one entry per chunk.
+    cfg = dict(extra_config or {})
+    per_chunk = cfg.pop("per_chunk", None)
 
     with tempfile.TemporaryDirectory(prefix=f"scrolltone_{engine}_par_") as tmp_dir:
         tmp_path = Path(tmp_dir)
@@ -221,7 +302,8 @@ def _synthesize_chapter_parallel(
                 "reference_wav":  reference_wav,
                 "out_dir":        str(out_dir),
                 "device":         device,
-                **(extra_config or {}),
+                **cfg,
+                **({"chunk_params": [per_chunk[i] for i in indices]} if per_chunk is not None else {}),
             }))
             stderr_path = worker_dir / "stderr.log"
             stderr_file = open(stderr_path, "w")
@@ -244,9 +326,21 @@ def _synthesize_chapter_parallel(
             for line in worker["proc"].stdout:
                 match = PROGRESS_RE.match(line)
                 if match:
+                    local_done = int(match.group(1))
                     with progress_lock:
-                        worker["done"] = int(match.group(1))
-                        on_progress(sum(w["done"] for w in workers), total)
+                        worker["done"] = local_done
+                        _safe_call(on_progress, sum(w["done"] for w in workers), total,
+                                   what="on_progress")
+                    if on_chunk_done is not None and 0 < local_done <= len(worker["indices"]):
+                        global_i = worker["indices"][local_done - 1]
+                        wav_path = worker["out_dir"] / f"chunk_{global_i:04d}.wav"
+                        if wav_path.exists():
+                            _safe_call(on_chunk_done, global_i, wav_path, what="on_chunk_done")
+                elif on_log is not None:
+                    heartbeat = HEARTBEAT_RE.match(line)
+                    if heartbeat:
+                        _safe_call(on_log, f"worker {worker['id']}: {heartbeat.group(1)}",
+                                   what="on_log")
 
         def _watch_stop():
             if stop_check is None:

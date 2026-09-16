@@ -152,6 +152,16 @@ SAMPLE_TEXT = (
     "for the first time in weeks."
 )
 
+# Shorter cut of SAMPLE_TEXT — calm → tense → relieved only, dropping the
+# "phone rings" second half — used for the Preview & Tweak job (backend/
+# pipeline.py run_preview_job), which re-synthesizes from scratch on every
+# parameter tweak. Higgs/Chatterbox pay a full model load per click on top
+# of generation time, so keeping that loop short matters more than covering
+# every emotional register in one sample. The quick voice-audition button
+# (synthesize_sample, cached to disk) still uses the full SAMPLE_TEXT since
+# it only pays that cost once per voice.
+PREVIEW_JOB_TEXT = " ".join(SAMPLE_TEXT.split()[:107])
+
 
 def synthesize_sample(voice: str, speed: float = 1.0, word_count: int | None = None):
     """Synthesize (a prefix of) SAMPLE_TEXT for *voice* at *speed*.

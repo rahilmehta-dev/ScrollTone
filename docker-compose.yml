@@ -1,10 +1,11 @@
 # ScrollTone loads a single Kokoro model per job (~1.5 GB), or one Chatterbox
-# subprocess per chatterbox_workers (~6.6 GB each — runs inside this same
-# container's memory cgroup, since it's a subprocess, not a separate
-# container). mem_limit below covers Kokoro + one Chatterbox worker; raise it
-# proportionally if you set chatterbox_workers > 1 in the UI. Higgs Audio V2
-# uses ~12GB RAM per conversion on its own — if you set that up too, raise
-# mem_limit/memswap_limit further (e.g. 14g/16g) to cover it.
+# subprocess per chatterbox_workers (~6.6 GB each), or one Higgs subprocess
+# per higgs_workers (~12 GB each) — all run inside this same container's
+# memory cgroup, since they're subprocesses, not separate containers.
+# mem_limit below covers Kokoro + one Chatterbox worker; raise it
+# proportionally if you set chatterbox_workers > 1 or higgs_workers > 1 in
+# the UI (e.g. higgs_workers=2 needs ~24GB on its own — raise mem_limit/
+# memswap_limit to something like 26g/28g).
 # Exit code 137 = OOM kill → increase mem_limit below.
 
 services:

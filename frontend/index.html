@@ -125,18 +125,17 @@
 
 
         <div class="field">
-          <label>Narrator <i class="tip" data-tip="Kokoro is fast, lightweight, and runs in-process — the recommended default. Higgs Audio V2 and Chatterbox clone a voice from a clip you upload, but both require a separate one-time setup (see README) and are far slower than Kokoro.">ⓘ</i></label>
+          <label>Narrator <i class="tip" data-tip="Kokoro is fast, lightweight, and runs in-process — the recommended default. Chatterbox clones a voice from a clip you upload, but requires a separate one-time setup (see README) and is far slower than Kokoro (CPU-only, ~6x realtime).">ⓘ</i></label>
           <!-- Real control — kept fully wired (id, onchange) so every existing
                listener keeps working. Visually replaced by the plain-language
-               choice below; pickVoiceMode()/pickCloneModel() drive this select
-               and its native 'change' event, so it's the single source of
-               truth either way. The three engine names never appear in the
-               primary flow — someone who's never heard of Kokoro vs. Higgs
-               vs. Chatterbox is only ever choosing "fast" or "my own voice". -->
+               choice below; pickVoiceMode() drives this select and its native
+               'change' event, so it's the single source of truth either way.
+               Higgs Audio V2 support still exists server-side (backend/engines/
+               higgs_synth.py) but isn't offered in this build — see git history
+               if re-enabling it. -->
           <select id="engine" onchange="toggleEngine()" class="engine-select-native">
             <option value="kokoro" selected>Kokoro — fast, built-in voices (recommended)</option>
-            <option value="higgs">Higgs Audio V2 — cloned voice, ~1x realtime, ~12GB RAM</option>
-            <option value="chatterbox">Chatterbox — cloned voice, uses Device setting (MPS has a known memory-leak risk)</option>
+            <option value="chatterbox">Chatterbox — cloned voice, CPU-only, ~6x slower than realtime</option>
           </select>
           <div class="voice-choice" id="voice-choice">
             <button type="button" class="vc-opt active" id="vc-existing-btn" aria-pressed="true" onclick="pickVoiceMode('existing')">
@@ -159,15 +158,6 @@
             <div id="reference-audio-status" style="font-size:.73rem;color:var(--txt-s);margin-top:4px;min-height:0"></div>
           </div>
           <div id="engine-warning" class="callout callout-warn" style="margin-top:8px"></div>
-
-          <div class="footnote" id="clone-model-row" style="margin-top:8px">
-            We pick the best cloning model for your device automatically.
-            <a href="#" class="advlink" id="clone-model-link" onclick="toggleCloneModelPicker();return false">Want to choose it yourself? Advanced</a>
-          </div>
-          <div class="mini-seg" id="clone-model-picker" style="display:none;margin-top:8px">
-            <button type="button" class="mini-seg-opt active" data-model="higgs" onclick="pickCloneModel('higgs')">Higgs Audio V2</button>
-            <button type="button" class="mini-seg-opt" data-model="chatterbox" onclick="pickCloneModel('chatterbox')">Chatterbox</button>
-          </div>
 
           <!-- Auto-tune: samples a handful of parameter combos against the
                uploaded reference clip, scores each with an offline audio-
@@ -245,7 +235,15 @@
 
         <input type="hidden" id="lang" value="a">
 
-        <div class="div"></div>
+      </div><!-- end Narrator card -->
+
+      <!-- Sound and Output sit side by side — two related but independent
+           groups of settings, not one long card, so the page uses the
+           width it has instead of stacking everything in a single column. -->
+      <div class="grid2">
+
+      <div class="card">
+        <div class="sect"><span class="sect-ico">🔊</span>Sound</div>
 
         <!-- Key settings — promoted out of Advanced -->
         <div class="settings-checks">
@@ -293,16 +291,12 @@
             </select>
           </div>
         </div>
+      </div><!-- end Sound card -->
 
-      </div><!-- end Voice card -->
-
-      <!-- Output Settings sits below Voice card -->
   <div class="card opts-card">
     <div class="opts-bar">
 
       <div class="sect" style="margin:0;flex-shrink:0"><span class="sect-ico">⚙️</span>Output</div>
-
-      <div class="opts-sep"></div>
 
       <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
         <span style="font-size:.8rem;font-weight:600;color:var(--txt-m);display:flex;align-items:center;gap:5px">Format <i class="tip" data-tip="WAV = lossless, larger files (~5× bigger). MP3 = smaller with embedded cover art, title, author tags — great for music apps.">ⓘ</i></span>
@@ -325,8 +319,6 @@
           <option value="320">320 kbps</option>
         </select>
       </div>
-
-      <div class="opts-sep"></div>
 
       <button class="adv-btn" id="adv-btn" onclick="toggleAdv()" style="margin:0;flex-shrink:0">
         <span class="arr">▶</span> Advanced (optional)
@@ -405,27 +397,13 @@
           <div class="field" id="chatterbox-breaths-field" style="display:none">
             <label><input type="checkbox" id="chatterbox_breaths" checked style="width:auto;margin-right:6px">Natural Breathing <i class="tip" data-tip="Without this, chunks are stitched back-to-back with dead silence, which sounds rushed. When on, a short synthesized breath sound is spliced between paragraph-like boundaries instead, for a more natural, podcast-like cadence.">ⓘ</i></label>
           </div>
-          <div class="field" id="higgs-temperature-field" style="display:none">
-            <label>Variation <i class="tip" data-tip="Same delivery every time ↔ changes naturally line to line. Every chunk is generated independently, so higher values can make the cloned voice drift or sound inconsistent across a long book. This app defaults much lower than the model's own default for narration consistency.">ⓘ</i></label>
-            <input type="number" id="higgs_temperature" value="0.15" min="0.05" max="1.5" step="0.05">
-          </div>
-          <div class="field" id="higgs-top-p-field" style="display:none">
-            <label>Expressiveness <i class="tip" data-tip="More natural and varied ↔ calmer and more consistent. This app defaults lower than the model's own default for narration consistency, same reasoning as Variation above.">ⓘ</i></label>
-            <input type="number" id="higgs_top_p" value="0.75" min="0.1" max="1.0" step="0.05">
-          </div>
-          <div class="field" id="higgs-top-k-field" style="display:none">
-            <label>Word Variety <i class="tip" data-tip="More focused and predictable ↔ more varied word choices. This app defaults lower than the model's own default for narration consistency, same reasoning as Variation above.">ⓘ</i></label>
-            <input type="number" id="higgs_top_k" value="25" min="1" max="200" step="1">
-          </div>
-          <div class="field" id="higgs-workers-field" style="display:none">
-            <label>Parallel Processing <i class="tip" data-tip="Runs more copies at once to finish faster. Capped at 4 — each one uses about 12GB of RAM and they share the same GPU, which doesn't speed things up as predictably as CPU-based parallel processing. Only raise this if you have RAM to spare (64GB+ recommended for 2+).">ⓘ</i></label>
-            <input type="number" id="higgs_workers" value="1" min="1" max="4" step="1">
-          </div>
         </div>
       </div>
       </div>
     </div>
   </div><!-- end opts-card -->
+
+      </div><!-- end grid2 (Sound | Output) -->
 
     <!-- Preview & Tweak — right after picking voice/model/params, before Run -->
     <div class="card" id="preview-card">

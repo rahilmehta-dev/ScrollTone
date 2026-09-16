@@ -85,7 +85,14 @@ def split_chunks(text: str, chunk_size: int = 500) -> list[str]:
 
 
 def rss_gb() -> float:
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024.0 ** 3)
+    # ru_maxrss is in BYTES on macOS but KILOBYTES on Linux (getrusage(2)).
+    # Without this scaling the Linux/Docker path — the primary deployment
+    # target — under-reports memory by 1024x, so the safety abort below can
+    # never fire and the memory guard silently does nothing.
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if sys.platform != "darwin":
+        rss *= 1024
+    return rss / (1024.0 ** 3)
 
 
 def run_kokoro(chunks: list[str], out_wav: Path) -> dict:

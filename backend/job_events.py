@@ -4,7 +4,8 @@ Wraps a job's asyncio.Queue with typed push helpers so pipeline code
 constructs events through a small interface instead of raw dicts scattered
 through the pipeline. Pushed messages are JSON strings compatible with the
 SSE stream format read by routes/convert.py's /stream endpoint:
-    {"type": "log"|"status"|"progress"|"ch_info"|"ch_start"|"ch_prog"|"ch_skip"|"file"}
+    {"type": "log"|"status"|"progress"|"ch_info"|"ch_start"|"ch_prog"|"ch_skip"|"file"|
+             "autotune_result"|"autotune_voice_result"|"autotune_candidate_result"}
 """
 import json
 from asyncio import AbstractEventLoop

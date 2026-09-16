@@ -94,9 +94,9 @@ class ChapterProcessor:
             }
         elif engine == "higgs":
             extra_config = {
-                "temperature": settings.get("higgs_temperature", 0.3),
-                "top_p":       settings.get("higgs_top_p", 0.95),
-                "top_k":       settings.get("higgs_top_k", 50),
+                "temperature": settings.get("higgs_temperature", 0.15),
+                "top_p":       settings.get("higgs_top_p", 0.75),
+                "top_k":       settings.get("higgs_top_k", 25),
             }
         elif engine == "kokoro":
             extra_config = {
@@ -107,6 +107,8 @@ class ChapterProcessor:
             num_workers = settings.get("chatterbox_workers", 1)
         elif engine == "kokoro":
             num_workers = kokoro_workers
+        elif engine == "higgs":
+            num_workers = settings.get("higgs_workers", 1)
         else:
             num_workers = 1
         try:
@@ -116,6 +118,7 @@ class ChapterProcessor:
                 stop_check=self.job_state["stop_event"].is_set,
                 extra_config=extra_config,
                 num_workers=num_workers,
+                on_log=lambda msg: log(f"   [{engine}] {msg}"),
             )
         except EngineNotInstalled as error:
             log(f"   ! {error}")

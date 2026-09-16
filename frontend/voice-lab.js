@@ -10,7 +10,9 @@
 // updates/reshuffles candidate by candidate), and "autotune_voice_result"
 // fires once per completed voice with the final authoritative ranking.
 
-const WORKERS_CAP = { chatterbox: 16, higgs: 4 };
+// Chatterbox is the only engine this tool offers (see git history around
+// 2026-09-08 for why Higgs was dropped from the UI) — always CPU-only,
+// well-tested up to 16 parallel workers.
 
 let _labJobId = null;
 let _labEventSource = null;
@@ -23,13 +25,6 @@ function toast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 3200);
-}
-
-function onLabEngineChange() {
-  const engine = document.getElementById('lab-engine').value;
-  document.getElementById('lab-workers').max = WORKERS_CAP[engine];
-  const workersInput = document.getElementById('lab-workers');
-  if (Number(workersInput.value) > WORKERS_CAP[engine]) workersInput.value = WORKERS_CAP[engine];
 }
 
 function fmtBytes(n) {
@@ -83,24 +78,22 @@ async function startBatchAutotune() {
   if (files.length < 1) { toast('Upload at least one voice clip'); return; }
   if (files.length > 8) { toast('Upload at most 8 voice clips at once'); return; }
 
-  const engine = document.getElementById('lab-engine').value;
-  const device = document.getElementById('lab-device').value;
+  const engine = 'chatterbox';
   const candidates = document.getElementById('lab-candidates').value || '20';
   const seed = document.getElementById('lab-seed').value || '411';
   const workers = document.getElementById('lab-workers').value || '1';
 
   const fd = new FormData();
   fd.append('engine', engine);
-  fd.append('device', device);
+  fd.append('device', 'cpu');
   fd.append('num_candidates', candidates);
   fd.append('seed', seed);
-  if (engine === 'chatterbox') fd.append('chatterbox_workers', workers);
-  else fd.append('higgs_workers', workers);
+  fd.append('chatterbox_workers', workers);
   for (const f of files) fd.append('reference_audio', f);
 
   _setLabRunning(true);
   document.getElementById('lab-status').textContent = 'Starting…';
-  _labLog('Started — ' + engine + ' · device=' + device + ' · ' + files.length + ' voice(s) · ' + candidates + ' candidates each · seed=' + seed, 'sl-start');
+  _labLog('Started — ' + files.length + ' voice(s) · ' + candidates + ' candidates each · seed=' + seed + ' · workers=' + workers, 'sl-start');
 
   let jobId;
   try {

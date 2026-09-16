@@ -34,7 +34,8 @@ Want to modify ScrollTone's code instead of just running it? See [documentation/
 - **Enhance Audio** — optional ffmpeg post-processing: compression + 200 Hz warmth boost + 8 kHz harshness cut
 - **Multi-voice (Speaker Attribution)** — local LLM via Ollama detects dialogue speakers and assigns a unique Kokoro voice to each character automatically
 - **Ambient Sound** — local LLM detects scene cues (rain, wind, fire, crowd, …) and mixes a quiet procedurally-generated background bed under the narration (see [documentation/ambience.md](documentation/ambience.md))
-- **Voice cloning** — optional Higgs Audio V2 / Chatterbox engines clone a voice from an uploaded reference clip (see [documentation/engines.md](documentation/engines.md))
+- **Voice cloning** — the optional Chatterbox engine clones a voice from an uploaded reference clip (see [documentation/engines.md](documentation/engines.md))
+- **Auto-tune this voice / Voice Lab** — automatically searches Chatterbox's sampling parameters against your reference clip and scores each candidate with an offline audio-quality model, so you don't have to A/B settings by ear; Voice Lab runs the same search across several candidate clips at once and ranks them (see [documentation/engines.md](documentation/engines.md#auto-tune-this-voice))
 
 ---
 
@@ -43,7 +44,7 @@ Want to modify ScrollTone's code instead of just running it? See [documentation/
 | Doc | Covers |
 |---|---|
 | [documentation/installation.md](documentation/installation.md) | Docker setup + RAM tuning (primary path); native macOS/Linux setup for contributors |
-| [documentation/engines.md](documentation/engines.md) | Multi-voice (Ollama) setup, optional Higgs Audio V2 / Chatterbox voice-cloning engines |
+| [documentation/engines.md](documentation/engines.md) | Multi-voice (Ollama) setup, the Chatterbox voice-cloning engine (+ Higgs Audio V2 server-side), and Auto-tune / Voice Lab |
 | [documentation/ambience.md](documentation/ambience.md) | How the procedurally-generated ambient sound beds work |
 | [documentation/settings.md](documentation/settings.md) | Every setting in the UI, what it does, and its default |
 | [documentation/architecture.md](documentation/architecture.md) | Project structure and where to start reading the code |

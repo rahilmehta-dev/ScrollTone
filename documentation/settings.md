@@ -2,7 +2,7 @@
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| TTS Engine | Kokoro | Kokoro (built-in voices) or Higgs Audio V2 / Chatterbox (clone a voice from an uploaded clip) — see [engines.md](engines.md) |
+| TTS Engine | Kokoro | Kokoro (built-in voices) or Chatterbox (clone a voice from an uploaded clip) — see [engines.md](engines.md). Higgs Audio V2 support still exists server-side but isn't offered here in this build |
 | Narrator Voice | `af_heart` | Voice used for narration (and all speech in single-voice mode). Kokoro only. |
 | Speed | `1.0×` | Playback speed (0.5 – 2.5) |
 | Output Format | WAV | WAV or MP3 (MP3 embeds cover art & metadata) |
@@ -25,6 +25,5 @@
 | Chatterbox Exaggeration | `0.7` | Emotional intensity of the delivery (~0.5 is neutral) |
 | Chatterbox Temperature | `0.8` | Sampling randomness — higher adds natural sentence-to-sentence variation |
 | Chatterbox Breathing Pauses | On | Splices a short synthesized breath between chunk boundaries instead of dead silence |
-| Higgs Temperature | `0.3` | Sampling randomness. Every chunk is an independent generation call, so higher values can make the cloned voice drift across a long book — lower for more consistency. Boson's own default is 1.0; this app defaults lower for narration |
-| Higgs Top P | `0.95` | Nucleus sampling cutoff — lower = more predictable/consistent, higher = more varied |
-| Higgs Top K | `50` | Only the K most likely tokens considered per step — lower = more predictable/consistent, higher = more varied |
+
+Higgs Audio V2's settings (Temperature, Top P, Top K, Parallel Workers) aren't listed here since Higgs isn't currently selectable in the UI — see the note in [engines.md](engines.md#optional-higgs-audio-v2--chatterbox-engines) if calling it directly via the API.

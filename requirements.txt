@@ -48,3 +48,17 @@ librosa>=0.11.0
 # confirmed, severe memory leak on Apple's MPS backend (grew past 78GB RSS in
 # testing). Do not override this without re-validating from scratch.
 chatterbox-tts>=0.1.7
+
+# ── Auto-tune voice (optional) ──────────────────────────────────────────────────
+# Scores candidate Chatterbox/Higgs parameter combos with DNSMOS, an offline
+# no-reference audio-quality model — see backend/voice_tuning.py. Unlike the
+# Higgs/Chatterbox sections above, these DO belong in the MAIN venv — scoring
+# runs in the main process after collecting each candidate's audio, not in
+# .venv-higgs/.venv-chatterbox. speechmos bundles its ONNX model weights in
+# the wheel — no separate download. librosa is already listed above for
+# .venv-higgs, but is needed here too (speechmos imports it directly) — pip
+# will just dedupe if you're installing this whole file into one venv.
+speechmos>=0.0.1
+librosa>=0.11.0
+onnxruntime>=1.20.0
+scipy>=1.11.0

@@ -63,9 +63,10 @@ async def convert(
     chatterbox_exaggeration: float = Form(0.7),
     chatterbox_temperature:  float = Form(0.8),
     chatterbox_breaths:      str   = Form("true"),  # synthetic breath sounds between chunks
-    higgs_temperature:   float = Form(0.3),  # lower than Boson's own 1.0 default — see note below
-    higgs_top_p:         float = Form(0.95),
-    higgs_top_k:         int   = Form(50),
+    higgs_temperature:   float = Form(0.15),  # lower than Boson's own 1.0 default — see note below
+    higgs_top_p:         float = Form(0.75),  # lower than Boson's own 0.95 default — same reasoning
+    higgs_top_k:         int   = Form(25),    # lower than Boson's own 50 default — same reasoning
+    higgs_workers:       int   = Form(1),     # concurrent Higgs subprocesses per chapter — see cap below
 ):
     if engine not in ("kokoro", "higgs", "chatterbox"):
         raise HTTPException(400, f"Unknown engine: {engine}")
@@ -85,6 +86,12 @@ async def convert(
     higgs_temperature = max(0.05, min(higgs_temperature, 1.5))
     higgs_top_p       = max(0.1, min(higgs_top_p, 1.0))
     higgs_top_k       = max(1, min(higgs_top_k, 200))
+    # Capped far lower than chatterbox_workers (16): each Higgs instance is
+    # ~12GB RAM (vs. Chatterbox's ~6.6GB, CPU-only) and, unlike Chatterbox's
+    # well-tested CPU multiprocessing, these run on MPS/CUDA — multiple
+    # processes contending for the same GPU is untested here and scales far
+    # less predictably than independent CPU workers.
+    higgs_workers = max(1, min(higgs_workers, 4))
 
     if engine != "kokoro":
         if multi_voice.lower() == "true":
@@ -247,6 +254,7 @@ async def convert(
             "higgs_temperature":   higgs_temperature,
             "higgs_top_p":         higgs_top_p,
             "higgs_top_k":         higgs_top_k,
+            "higgs_workers":       higgs_workers,
             "reference_warnings":  reference_warnings,
         }
 
