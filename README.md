@@ -1,6 +1,6 @@
 # ScrollTone — EPUB to Audiobook
 
-A self-hosted web app that converts EPUB books to audiobooks using [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M). Runs in Docker and is accessible from any device on your network.
+A self-hosted web app that converts EPUB books to audiobooks using [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M). **Docker is the primary way to run it** — no Python setup, no `requirements.txt`, no virtual environments. Accessible from any device on your network.
 
 ---
 
@@ -10,9 +10,11 @@ A self-hosted web app that converts EPUB books to audiobooks using [Kokoro-82M](
 docker compose up --build
 ```
 
-Then open **http://localhost:7860** in your browser.
+Then open **http://localhost:7860** in your browser. That's it — everything else (PyTorch, Kokoro weights, spaCy) is baked into the image at build time.
 
-> The first build takes several minutes — it downloads PyTorch, Kokoro-82M weights (~330 MB), and the spaCy language model so they are baked into the image and never re-downloaded at runtime.
+> The first build takes several minutes for that reason. Subsequent starts are fast.
+
+Want to modify ScrollTone's code instead of just running it? See [documentation/installation.md#local-development-for-contributors](documentation/installation.md#local-development-for-contributors) for the native Python setup (`requirements.txt`, venvs) — that path is for contributors, not required for normal use.
 
 ---
 
@@ -31,182 +33,24 @@ Then open **http://localhost:7860** in your browser.
 - Transformer G2P — better pronunciation for unusual words and names (slower, downloads 457 MB extra)
 - **Enhance Audio** — optional ffmpeg post-processing: compression + 200 Hz warmth boost + 8 kHz harshness cut
 - **Multi-voice (Speaker Attribution)** — local LLM via Ollama detects dialogue speakers and assigns a unique Kokoro voice to each character automatically
+- **Ambient Sound** — local LLM detects scene cues (rain, wind, fire, crowd, …) and mixes a quiet procedurally-generated background bed under the narration (see [documentation/ambience.md](documentation/ambience.md))
+- **Voice cloning** — the optional Chatterbox engine clones a voice from an uploaded reference clip (see [documentation/engines.md](documentation/engines.md))
+- **Auto-tune this voice / Voice Lab** — automatically searches Chatterbox's sampling parameters against your reference clip and scores each candidate with an offline audio-quality model, so you don't have to A/B settings by ear; Voice Lab runs the same search across several candidate clips at once and ranks them (see [documentation/engines.md](documentation/engines.md#auto-tune-this-voice))
 
 ---
 
-## Multi-voice Setup
+## Documentation
 
-Multi-voice uses a local LLM to detect who is speaking each dialogue line and assigns different voices to different characters. The narrator uses your chosen voice; characters are assigned gender-matched voices automatically.
-
-**Requirements:** [Ollama](https://ollama.com) running locally.
-
-```bash
-# Install Ollama (macOS)
-brew install ollama
-
-# Start Ollama
-ollama serve
-
-# Pull a model (pick one)
-ollama pull phi3:mini       # ~2 GB RAM — recommended
-ollama pull llama3.2:1b     # ~1 GB RAM — fastest
-ollama pull llama3.2:3b     # ~2.5 GB RAM — best quality
-```
-
-Then in ScrollTone: enable **Multi-voice** in Advanced Settings, set the Ollama URL to `http://localhost:11434`, and pick your model. The LLM Attribution card in the output panel shows each character being assigned a voice in real time.
-
-> If Ollama is not running, ScrollTone logs the error and automatically falls back to single-voice — it will not crash.
-
-> **Running in Docker?** Set the Ollama URL to `http://host.docker.internal:11434` — `localhost` inside a container refers to the container itself, not your Mac. ScrollTone detects Docker and updates the default automatically.
-
----
-
-## Docker RAM Requirements
-
-ScrollTone loads a single Kokoro model per job (~1.5 GB). Allocate at least **4 GB** to Docker Desktop (Settings → Resources → Memory) before running the container.
-
-Exit code **137** in the container logs always means OOM — increase Docker RAM and restart.
-
-When converting multiple EPUBs, books are processed **sequentially** — one book's pipeline is fully released before the next book starts. This keeps peak RAM predictable regardless of batch size.
-
----
-
-## All Settings
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| Narrator Voice | `af_heart` | Voice used for narration (and all speech in single-voice mode) |
-| Speed | `1.0×` | Playback speed (0.5 – 2.5) |
-| Output Format | WAV | WAV or MP3 (MP3 embeds cover art & metadata) |
-| MP3 Bitrate | 192 kbps | 128 / 192 / 256 / 320 kbps |
-| Merge Chapters | On | Produce a single combined file in addition to per-chapter files |
-| Device | Auto | CPU, CUDA GPU, or MPS (Apple Silicon) — auto-detected |
-| Transformer G2P | Off | Better pronunciation, much slower, downloads 457 MB extra on first use |
-| Enhance Audio | Off | ffmpeg: compression + 200 Hz warmth + 8 kHz cut. Requires `ffmpeg` on PATH |
-| Multi-voice | Off | LLM speaker attribution via Ollama. Requires Ollama running locally |
-| Ollama URL | `http://localhost:11434` | URL of your local Ollama instance |
-| Ollama Model | `phi3:mini` | Model used for speaker attribution |
-| Max Chunk Size | `500` chars | Max characters per TTS synthesis call |
-| Chapter Silence | `1.0` s | Silence gap between chapters in merged file |
-| Min Chapter Length | `200` chars | Skip EPUB sections shorter than this |
-
----
-
-## Changing the Memory Limit
-
-Edit `docker-compose.yml` to match your Docker RAM allocation:
-
-```yaml
-mem_limit: 4g       # change this
-memswap_limit: 6g   # keep 2g above mem_limit
-```
-
-Then restart:
-
-```bash
-docker compose down && docker compose up
-```
-
----
-
-## Running Locally (macOS Apple Silicon — M1/M2/M3)
-
-**Step 1 — System dependencies**
-
-```bash
-brew install ffmpeg libsndfile
-```
-
-**Step 2 — Create a fresh conda environment**
-
-```bash
-conda create -n scrolltone python=3.11 -y
-conda activate scrolltone
-```
-
-**Step 3 — Install PyTorch (M1 native with Metal/MPS support)**
-
-```bash
-pip install torch torchaudio
-```
-
-> Do **not** use `--index-url https://download.pytorch.org/whl/cpu` — that is the Linux CPU-only build. The standard pip package includes M1 Metal acceleration automatically.
-
-**Step 4 — Install app dependencies**
-
-```bash
-pip install -r requirements.txt
-python -m spacy download en_core_web_sm
-```
-
-**Step 5 — Run**
-
-```bash
-python app.py
-```
-
-Open **http://localhost:7860**
-
-### M1 Notes
-
-| Topic | Detail |
-|-------|--------|
-| First conversion | Kokoro downloads ~330 MB of weights to `~/.cache/huggingface` — one time only |
-| Device setting | Leave on **Auto** — Kokoro uses Metal (MPS) automatically on Apple Silicon |
-| Voice previews | First click per voice takes ~5–10 s to generate, then instant |
-| MP3 output | Uses the ffmpeg installed in Step 1 — works natively |
-| Multi-voice | Run `ollama serve` in a separate terminal before starting ScrollTone |
-
----
-
-## Running Without Docker (Linux / generic)
-
-**Step 1 — System dependencies**
-
-```bash
-sudo apt install ffmpeg libsndfile1   # Debian / Ubuntu
-sudo dnf install ffmpeg libsndfile    # Fedora / RHEL
-```
-
-**Step 2 — Install app dependencies**
-
-```bash
-pip install -r requirements.txt
-python app.py
-# Open http://localhost:7860
-```
+| Doc | Covers |
+|---|---|
+| [documentation/installation.md](documentation/installation.md) | Docker setup + RAM tuning (primary path); native macOS/Linux setup for contributors |
+| [documentation/engines.md](documentation/engines.md) | Multi-voice (Ollama) setup, the Chatterbox voice-cloning engine (+ Higgs Audio V2 server-side), and Auto-tune / Voice Lab |
+| [documentation/ambience.md](documentation/ambience.md) | How the procedurally-generated ambient sound beds work |
+| [documentation/settings.md](documentation/settings.md) | Every setting in the UI, what it does, and its default |
+| [documentation/architecture.md](documentation/architecture.md) | Project structure and where to start reading the code |
 
 ---
 
 ## Output Files
 
 Audio files are saved to `audiobook_output/BookTitle/` next to the app (or your chosen output folder). Each book gets its own subfolder named after the book title. Files persist across restarts and can be downloaded directly from the browser during or after conversion.
-
----
-
-## Project Structure
-
-```
-app.py                  Entry point — boots the FastAPI backend and serves frontend/ at "/"
-
-backend/
-├── routes/              HTTP layer — what the browser calls
-│   ├── convert.py         POST /api/convert, /chapters, /stream, /stop, /download
-│   ├── preview.py         GET  /api/preview/{voice}
-│   └── ui.py               /api/config, /pick-folder, /shutdown
-├── pipeline.py           The orchestrator — reads the EPUB, chunks text, drives Kokoro, writes files
-├── epub_parser.py         EPUB chapter/metadata extraction (used by pipeline.py)
-├── attribution.py          Ollama LLM speaker attribution for multi-voice (used by pipeline.py)
-├── voices.py                Voice catalog, VoiceMapper, preview synthesis
-├── audio.py                  WAV/MP3 export, ffmpeg enhancement
-├── state.py                Shared app state (upload/output dirs, job registry)
-└── schemas.py               Pydantic models
-
-frontend/                The web UI (index.html, app.js, style.css), served by app.py
-
-docs/                    Unrelated — the GitHub Pages marketing/landing site, not part of the running app
-
-scripts/                 Dev helpers (generate_previews.py runs at Docker build time)
-```
-
-Reading order to understand a conversion request: `backend/routes/convert.py` → `backend/pipeline.py` (`convert_book`, the heart of it) → the leaf modules it calls (`epub_parser.py`, `attribution.py`, `voices.py`, `audio.py`).

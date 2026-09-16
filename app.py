@@ -32,7 +32,7 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 import backend.state as state        # initialises dirs on import
-from backend.routes import convert, preview, ui
+from backend.routes import autotune, chapters, convert, preview, ui
 
 app = FastAPI(title="ScrollTone")
 
@@ -43,9 +43,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def no_static_cache(request, call_next):
+    """Force revalidation (ETag/If-None-Match) on every frontend asset
+    request instead of letting browsers fall back to heuristic caching.
+    StaticFiles sets Last-Modified/ETag but no Cache-Control, so without
+    this a browser can silently keep serving index.html/app.js/style.css
+    from a build several redesigns ago after a `git pull`."""
+    response = await call_next(request)
+    if request.method == "GET" and not request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 api_router = APIRouter(prefix="/api")
 api_router.include_router(ui.router)
 api_router.include_router(preview.router)
+api_router.include_router(autotune.router)
+api_router.include_router(chapters.router)
 api_router.include_router(convert.router)
 app.include_router(api_router)
 

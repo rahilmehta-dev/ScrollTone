@@ -5,17 +5,17 @@ Run once at Docker build time — output goes to /app/previews/.
 """
 import os
 import sys
+from pathlib import Path
+
 import numpy as np
 import soundfile as sf
 from kokoro import KPipeline
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from backend.voices import SAMPLE_TEXT  # the one shared preview/live-preview sample
+
 PREVIEW_DIR = "/app/previews"
 os.makedirs(PREVIEW_DIR, exist_ok=True)
-
-PREVIEW_TEXT = (
-    "Hello! I'll be your narrator for this audiobook. "
-    "Whether the story is long or short, I'm here to bring every page to life."
-)
 
 # voice -> lang_code mapping
 VOICES = {
@@ -50,7 +50,7 @@ for lang, voice_list in VOICES.items():
             continue
         try:
             chunks = [audio for _, _, audio in
-                      pipelines[lang](PREVIEW_TEXT, voice=voice, speed=1.0)]
+                      pipelines[lang](SAMPLE_TEXT, voice=voice, speed=1.0)]
             if not chunks:
                 raise ValueError("empty output")
             sf.write(out_path, np.concatenate(chunks), 24000)

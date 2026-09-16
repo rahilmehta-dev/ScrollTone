@@ -11,13 +11,15 @@ Characters:
 Run:
     python create_test_epub.py
 Output:
-    test_multivoice.epub
+    tests/fixtures/feature_books/test_multivoice.epub
 """
 
 import zipfile
-import os
+from pathlib import Path
 
-OUT = "test_multivoice.epub"
+OUT_DIR = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "feature_books"
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+OUT = str(OUT_DIR / "test_multivoice.epub")
 
 # ── Chapter content ────────────────────────────────────────────────────────────
 

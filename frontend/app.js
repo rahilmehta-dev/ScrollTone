@@ -3,28 +3,60 @@ let jobId       = null;
 let eventSource = null;
 let _fileIdx    = 0;  // for staggered file-item entrance animation
 let _jobRunning = false;  // true while any conversion is in progress
+let _serverDevices = ['auto', 'cpu'];  // from /api/config — what this server can actually use
 
 // Batch state (multi-EPUB)
 let batchJobIds = [];
 let batchSources = {};
 let batchState   = {};
 
+// ─── Shared preview sample text ────────────────────────────────────────────────
+// Fetched once from the backend (backend/voices.py PREVIEW_JOB_TEXT) so the UI
+// never has its own copy to drift out of sync with what's actually spoken.
+let _sampleText = '';
+fetch('/api/sample-text').then(r => r.json()).then(d => { _sampleText = d.text || ''; }).catch(() => {});
+
+// Can this browser open a native save-folder picker itself? Chrome/Edge/Brave
+// only (Firefox/Safari don't implement the File System Access API).
+const _fsAccessSupported = 'showDirectoryPicker' in window;
+
 // ─── Docker detection ─────────────────────────────────────────────────────────
+let _cpuCount = 4;
 fetch('/api/config').then(r => r.json()).then(d => {
-  if (!d.docker) return;
-  // Hide folder picker button — can't open native dialog in a headless container
-  const btn = document.getElementById('folder-btn');
-  if (btn) btn.style.display = 'none';
-  // Make path input editable so users can type a container-internal path
-  const outDirInput = document.getElementById('out_dir');
-  if (outDirInput) {
-    outDirInput.removeAttribute('readonly');
-    outDirInput.style.cursor = '';
-    outDirInput.placeholder = 'Default — files saved to audiobook_output/ on your host';
+  if (d.cpu_count) {
+    _cpuCount = d.cpu_count;
+    const workersInput = document.getElementById('chatterbox_workers');
+    if (workersInput) workersInput.max = String(_cpuCount);
+    const hint = document.getElementById('chatterbox-workers-hint');
+    if (hint) hint.textContent = 'This machine has ' + _cpuCount + ' CPU cores. ~6-7GB RAM per worker — keep worker count within what your RAM can hold.';
+
+    const kokoroWorkersInput = document.getElementById('kokoro_workers');
+    if (kokoroWorkersInput) kokoroWorkersInput.max = String(_cpuCount);
+    const kokoroHint = document.getElementById('kokoro-workers-hint');
+    if (kokoroHint) kokoroHint.textContent = 'This machine has ' + _cpuCount + ' CPU cores. ~1.5GB RAM per worker — keep worker count within what your RAM can hold.';
   }
-  // Update hint text
-  const hint = document.querySelector('#out_dir')?.closest('.field')?.querySelector('div[style*="margin-top"]');
-  if (hint) hint.textContent = 'Running in Docker. Output files appear in the audiobook_output/ folder next to your docker-compose.yml.';
+  // Processing Device — only offer options this server can actually use
+  // (e.g. MPS never applies inside a Linux Docker container).
+  if (d.devices && d.devices.length) {
+    _serverDevices = d.devices;
+    _updateDeviceOptions(document.getElementById('engine').value === 'kokoro');
+  }
+  if (!d.docker) return;
+  // The container has no GUI for a native OS dialog, and — more fundamentally
+  // — can't write to an arbitrary folder on your device at all (it can only
+  // see what's bind-mounted). The browser itself can, though: it's running on
+  // your actual device. Swap the folder button over to the File System Access
+  // API, which opens a real OS folder picker in the browser and hands us a
+  // handle we can write each finished file into as it completes.
+  const btn = document.getElementById('folder-btn');
+  const hint = document.getElementById('out-dir-hint');
+  if (_fsAccessSupported) {
+    if (btn) { btn.removeAttribute('onclick'); btn.addEventListener('click', chooseDeviceFolder); }
+    if (hint) hint.textContent = 'Click the folder button to choose a folder on this device — finished files are saved there automatically as they complete.';
+  } else {
+    if (btn) { btn.disabled = true; btn.title = 'Choosing a save folder needs Chrome, Edge, or Brave'; }
+    if (hint) hint.textContent = 'Choosing a save folder needs Chrome, Edge, or Brave. Finished files will also appear below to download individually.';
+  }
   // In Docker, localhost = the container. Ollama runs on the host, so use host.docker.internal.
   const ollamaInp = document.getElementById('ollama_url');
   if (ollamaInp && ollamaInp.value.includes('localhost')) {
@@ -45,14 +77,14 @@ dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-ove
 dropZone.addEventListener('drop', e => {
   e.preventDefault(); dropZone.classList.remove('drag-over');
   const all   = Array.from(e.dataTransfer.files);
-  const epubs = all.filter(f => f.name.toLowerCase().endsWith('.epub'));
-  if (epubs.length) {
+  const books = all.filter(f => /\.(epub|txt)$/i.test(f.name));
+  if (books.length) {
     fileInput.files = e.dataTransfer.files;
     showFiles(e.dataTransfer.files);
     dropZone.classList.add('drop-flash');
     dropZone.addEventListener('animationend', () => dropZone.classList.remove('drop-flash'), {once:true});
   } else {
-    toast('Please drop .epub files only');
+    toast('Please drop .epub or .txt files only');
   }
 });
 
@@ -62,20 +94,139 @@ function showFiles(fileList) {
   if (fileList.length === 1) {
     const f = fileList[0];
     n.textContent = f.name + '  (' + fmtBytes(f.size) + ')';
-    dropZone.querySelector('.up-title').textContent = 'EPUB loaded';
+    dropZone.querySelector('.up-title').textContent = 'Book loaded';
     dropZone.querySelector('.up-sub').textContent   = 'Click to replace';
+    _showCoverStrip(f.name);
     fetchChapters(f);
   } else {
     const total = Array.from(fileList).reduce((s, f) => s + f.size, 0);
     n.textContent = fileList.length + ' books selected  (' + fmtBytes(total) + ')';
-    dropZone.querySelector('.up-title').textContent = fileList.length + ' EPUBs loaded';
+    dropZone.querySelector('.up-title').textContent = fileList.length + ' books loaded';
     dropZone.querySelector('.up-sub').textContent   = 'Click to change selection';
     // Hide chapter card for multi-book batch
     document.getElementById('chapter-card').style.display = 'none';
+    document.getElementById('cover-strip').style.display = 'none';
+    _resetAtmosphere(); // no single cover to take the room's color from
     _chaptersData = [];
   }
   n.style.display = 'block';
 }
+
+// ─── Cover strip ────────────────────────────────────────────────────────────
+// Shows immediately with a filename-based title as an optimistic placeholder,
+// then _applyCoverData() (called once /api/chapters resolves) fills in the
+// real title/author/cover art the backend already extracts for MP3 tagging.
+function _showCoverStrip(filename) {
+  const strip = document.getElementById('cover-strip');
+  const img   = document.getElementById('cover-img');
+  const fallback = document.getElementById('cover-thumb-fallback');
+  img.style.display = 'none';
+  fallback.style.display = '';
+  document.getElementById('cover-strip-title').textContent = filename.replace(/\.(epub|txt)$/i, '');
+  document.getElementById('cover-strip-author').textContent = '';
+  strip.style.display = 'flex';
+  _resetAtmosphere(); // back to the default room color until a real cover loads
+}
+
+function _applyCoverData(d) {
+  if (d.title) document.getElementById('cover-strip-title').textContent = d.title;
+  if (d.author) document.getElementById('cover-strip-author').textContent = d.author;
+  if (d.cover && d.cover.data) {
+    const img = document.getElementById('cover-img');
+    img.onload = () => _updateAtmosphereFromCover(img);
+    img.src = 'data:' + d.cover.mime + ';base64,' + d.cover.data;
+    img.style.display = '';
+    document.getElementById('cover-thumb-fallback').style.display = 'none';
+  } else {
+    _resetAtmosphere(); // .txt upload, or an EPUB with no embedded cover
+  }
+}
+
+// ─── Atmosphere — the room takes its color from whatever book is loaded ───────
+// Same idea as Apple Music's Now Playing background: sample the cover on an
+// offscreen canvas (cheap — downsampled to 48x48 first) and turn its most
+// prominent hue(s) into the glow behind the whole page. Raw photo pixels are
+// rarely vivid enough to use directly, so only the *hue* is taken from the
+// image; saturation/lightness are pinned to values already tuned to look
+// good against the glass panels and text, regardless of source image.
+function _setAtmosphere(hueA, hueB) {
+  const root = document.documentElement.style;
+  root.setProperty('--atmo-a', 'hsl(' + hueA + ' 70% 58%)');
+  root.setProperty('--atmo-b', 'hsl(' + hueB + ' 55% 42%)');
+  root.setProperty('--atmo-c', 'hsl(' + hueA + ' 35% 16%)');
+  // Buttons, toggles, and badges don't crossfade the way the backdrop does —
+  // they're small, high-contrast surfaces where an instant color swap reads
+  // as "updated," not "broken," so a single --hue-a write is enough: every
+  // --accent* token in style.css is a hsl(var(--hue-a) ...) formula, not a
+  // literal, and recomputes on its own the moment this changes.
+  root.setProperty('--hue-a', hueA);
+  root.setProperty('--hue-b', hueB);
+}
+
+function _resetAtmosphere() {
+  const root = document.documentElement.style;
+  root.removeProperty('--atmo-a');
+  root.removeProperty('--atmo-b');
+  root.removeProperty('--atmo-c');
+  root.removeProperty('--hue-a');
+  root.removeProperty('--hue-b');
+}
+
+function _updateAtmosphereFromCover(imgEl) {
+  try {
+    const size = 48;
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(imgEl, 0, 0, size, size);
+    const { data } = ctx.getImageData(0, 0, size, size);
+
+    // Bucket pixels into 24 hue buckets (15° each), weighted by saturation
+    // so vivid pixels count more than washed-out ones. Near-grey/near-black/
+    // near-white pixels carry no usable hue and are skipped entirely.
+    const buckets = new Array(24).fill(0);
+    let vividCount = 0, total = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      total++;
+      const r = data[i] / 255, g = data[i + 1] / 255, b = data[i + 2] / 255;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      const l = (max + min) / 2, d = max - min;
+      if (d < 0.06 || l < 0.08 || l > 0.94) continue;
+      const s = d / (1 - Math.abs(2 * l - 1));
+      if (s < 0.15) continue;
+      let h;
+      if (max === r) h = ((g - b) / d) % 6;
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h = Math.round(h * 60);
+      if (h < 0) h += 360;
+      buckets[Math.floor(h / 15) % 24] += s;
+      vividCount++;
+    }
+
+    // A mostly black-and-white or monochrome cover has no real hue signal —
+    // fall back to the default room color instead of a meaningless one.
+    if (vividCount < total * 0.06) { _resetAtmosphere(); return; }
+
+    let primaryIdx = 0;
+    for (let i = 1; i < 24; i++) if (buckets[i] > buckets[primaryIdx]) primaryIdx = i;
+    // Secondary hue = the strongest bucket at least 60° away from the
+    // primary, so the two glows read as genuinely different colors instead
+    // of near-duplicates of the same hue.
+    let secondaryIdx = -1;
+    for (let i = 0; i < 24; i++) {
+      if (buckets[i] <= 0) continue; // bucket has no actual pixels — not a real candidate
+      const dist = Math.min(Math.abs(i - primaryIdx), 24 - Math.abs(i - primaryIdx));
+      if (dist >= 4 && (secondaryIdx === -1 || buckets[i] > buckets[secondaryIdx])) secondaryIdx = i;
+    }
+    const hueA = primaryIdx * 15 + 7;
+    const hueB = secondaryIdx === -1 ? (hueA + 45) % 360 : secondaryIdx * 15 + 7;
+    _setAtmosphere(hueA, hueB);
+  } catch (e) {
+    console.warn('Cover color extraction skipped:', e);
+  }
+}
+
 
 function fmtBytes(b) {
   if (b < 1024)    return b + ' B';
@@ -113,6 +264,7 @@ async function fetchChapters(file) {
     const d = await r.json();
     _chaptersData = d.chapters;
     _renderChapters(d.chapters);
+    _applyCoverData(d);
     tools.style.display = 'flex';
   } catch(e) {
     console.error('fetchChapters error:', e);
@@ -194,7 +346,8 @@ function switchToOutput() {
 
   if (banner) banner.style.display = 'none';
 
-  // Desktop two-column layout: both panels always visible — just activate output
+  // Desktop: switch from the full-width Book/Voice & Model pages to the
+  // two-column layout with the Output panel now visible alongside them.
   if (window.innerWidth >= 960) {
     main.classList.add('has-job');
     out.classList.add('active');
@@ -225,7 +378,8 @@ function backToSettings() {
     if (banner) banner.style.display = 'none';
   }
 
-  // Desktop: both panels always visible, nothing to swap
+  // Desktop: once a job has started, keep the Output panel around (it may
+  // still be running) rather than collapsing back to the full-width layout.
   if (window.innerWidth >= 960) return;
 
   // Mobile: restore settings panel
@@ -255,6 +409,57 @@ async function pickFolder() {
   btn.disabled = false; btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
 }
 
+// ─── Save to a folder on this device (Docker) ─────────────────────────────────
+// The Docker container can't write to an arbitrary host path — it only ever
+// sees whatever's bind-mounted. The browser can, though, since it's running on
+// your actual device: the File System Access API opens a real OS folder
+// picker there and hands back a handle we can write into directly. Once set,
+// each finished file is fetched from the server and written into that folder
+// as the conversion produces it — no server-side path involved at all.
+let _deviceDirHandle = null;
+
+async function chooseDeviceFolder() {
+  if (!_fsAccessSupported) {
+    toast('Choosing a save folder needs Chrome, Edge, or Brave');
+    return;
+  }
+  try {
+    _deviceDirHandle = await window.showDirectoryPicker({ id: 'scrolltone-output', mode: 'readwrite' });
+  } catch (e) {
+    return; // user cancelled the picker
+  }
+  document.getElementById('out_dir').value = _deviceDirHandle.name;
+  const status = document.getElementById('device-folder-status');
+  status.textContent = 'Finished files will be saved into "' + _deviceDirHandle.name + '" on this device automatically.';
+  status.style.display = 'block';
+  document.getElementById('clear-device-folder-btn').style.display = 'inline-flex';
+}
+
+function clearDeviceFolder() {
+  _deviceDirHandle = null;
+  document.getElementById('out_dir').value = '';
+  const status = document.getElementById('device-folder-status');
+  status.textContent = ''; status.style.display = 'none';
+  document.getElementById('clear-device-folder-btn').style.display = 'none';
+}
+
+async function saveFileToDevice(forJobId, filename) {
+  if (!_deviceDirHandle) return false;
+  try {
+    const resp = await fetch('/api/download/' + forJobId + '/' + encodeURIComponent(filename));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const blob = await resp.blob();
+    const fileHandle = await _deviceDirHandle.getFileHandle(filename, { create: true });
+    const writable   = await fileHandle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    return true;
+  } catch (e) {
+    console.error('saveFileToDevice failed:', e);
+    return false;
+  }
+}
+
 // ─── Advanced toggle ──────────────────────────────────────────────────────────
 function toggleAdv() {
   document.getElementById('adv-btn').classList.toggle('open');
@@ -272,6 +477,585 @@ function updateLlmSettingsVisibility() {
   document.getElementById('mv-settings').style.display = enabled ? 'block' : 'none';
 }
 
+// ─── TTS Engine toggle ────────────────────────────────────────────────────────
+// Higgs Audio V2 support still exists server-side (backend/engines/
+// higgs_synth.py, backend/routes/convert.py etc.) but isn't offered as a
+// choice in this build — Chatterbox is the sole cloning engine. See git
+// history if re-enabling Higgs in the UI.
+const ENGINE_WARNINGS = {
+  chatterbox: 'Runs CPU-only in this app (a memory-safety fix, not a setting) — expect roughly 6x the audiobook\'s runtime in processing time.',
+};
+
+// Plain-language voice-mode cards proxy the real #engine select: they set
+// its value and fire a native 'change' event so toggleEngine() (bound via
+// the select's own onchange) runs exactly as if the user had picked from
+// the dropdown. Keeps the select as the single source of truth.
+//
+// "Use a Voice" always means Kokoro. "Clone a Voice" always means Chatterbox
+// (the only cloning engine offered in this build).
+function pickVoiceMode(mode) {
+  const sel = document.getElementById('engine');
+  if (mode === 'existing') {
+    if (sel.value === 'kokoro') return;
+    sel.value = 'kokoro';
+  } else {
+    if (sel.value === 'chatterbox') return;
+    sel.value = 'chatterbox';
+  }
+  sel.dispatchEvent(new Event('change'));
+}
+
+const DEVICE_LABELS = {
+  auto: 'Auto — best available',
+  cpu:  'CPU only',
+  cuda: 'CUDA GPU',
+  mps:  'Apple Silicon (MPS)',
+};
+
+// Rebuilds the #device dropdown from _serverDevices, dropping GPU options
+// (mps/cuda) whenever a non-Kokoro engine is active — Chatterbox (the only
+// other engine offered in this build) is hardcoded CPU-only regardless of
+// this setting, so showing GPU options for it would just be a confusing
+// no-op. Falls back to 'auto' if the previously selected device got
+// filtered out from under it.
+function _updateDeviceOptions(isKokoro) {
+  const deviceSel = document.getElementById('device');
+  if (!deviceSel) return;
+  const previous = deviceSel.value;
+  const options = isKokoro ? _serverDevices : _serverDevices.filter(v => v === 'auto' || v === 'cpu');
+  deviceSel.innerHTML = options.map(v =>
+    `<option value="${v}"${v === 'auto' ? ' selected' : ''}>${DEVICE_LABELS[v] || v}</option>`
+  ).join('');
+  if (options.includes(previous)) deviceSel.value = previous;
+}
+
+function toggleEngine() {
+  const engine = document.getElementById('engine').value;
+  const isKokoro = engine === 'kokoro';
+
+  const existingBtn = document.getElementById('vc-existing-btn');
+  const cloneBtn = document.getElementById('vc-clone-btn');
+  existingBtn.classList.toggle('active', isKokoro);
+  existingBtn.setAttribute('aria-pressed', isKokoro ? 'true' : 'false');
+  cloneBtn.classList.toggle('active', !isKokoro);
+  cloneBtn.setAttribute('aria-pressed', !isKokoro ? 'true' : 'false');
+
+  document.getElementById('kokoro-voice-field').style.display = isKokoro ? '' : 'none';
+  document.getElementById('engine-settings').style.display = isKokoro ? 'none' : 'block';
+  document.getElementById('engine-warning').textContent = ENGINE_WARNINGS[engine] || '';
+  document.getElementById('kokoro-workers-field').style.display = isKokoro ? 'block' : 'none';
+  const workersField = document.getElementById('chatterbox-workers-field');
+  const speedField   = document.getElementById('chatterbox-speed-field');
+  const cfgField      = document.getElementById('chatterbox-cfg-field');
+  const exagField     = document.getElementById('chatterbox-exaggeration-field');
+  const tempField      = document.getElementById('chatterbox-temperature-field');
+  const breathsField   = document.getElementById('chatterbox-breaths-field');
+  const showWorkers  = engine === 'chatterbox';
+  workersField.style.display = showWorkers ? 'block' : 'none';
+  speedField.style.display   = showWorkers ? 'block' : 'none';
+  cfgField.style.display     = showWorkers ? 'block' : 'none';
+  exagField.style.display    = showWorkers ? 'block' : 'none';
+  tempField.style.display    = showWorkers ? 'block' : 'none';
+  breathsField.style.display = showWorkers ? 'block' : 'none';
+
+  // MPS/CUDA only ever matter for Kokoro now that Chatterbox (the only
+  // cloning engine offered here) is hardcoded CPU-only — showing them while
+  // Chatterbox is selected would just be a confusing no-op.
+  _updateDeviceOptions(isKokoro);
+
+  if (showWorkers) {
+    const advBtn  = document.getElementById('adv-btn');
+    const advBody = document.getElementById('adv-body');
+    if (advBtn && !advBtn.classList.contains('open')) { advBtn.classList.add('open'); advBody.classList.add('open'); }
+  }
+
+  const multiVoice = document.getElementById('multi_voice');
+  multiVoice.disabled = !isKokoro;
+  if (!isKokoro) multiVoice.checked = false;
+  multiVoice.closest('label').style.opacity = isKokoro ? '' : '.45';
+  multiVoice.closest('label').title = isKokoro ? '' : 'Multi-voice is Kokoro-only for now';
+  updateLlmSettingsVisibility();
+
+  // Speech Speed only does anything for Kokoro (Chatterbox has its own
+  // working "Chatterbox Speed" field above; Higgs has no rate control at all).
+  document.getElementById('speed-field').style.display = isKokoro ? '' : 'none';
+
+  // Transformer G2P is Kokoro's own phonemizer upgrade — Higgs/Chatterbox
+  // never touch Kokoro's G2P pipeline, so the toggle would do nothing there.
+  document.getElementById('trf-field').style.display = isKokoro ? '' : 'none';
+
+  // Preview & Tweak — same card, wording/behavior swaps per engine. Switching
+  // engines mid-preview makes whatever's in flight stale, so cancel it.
+  stopSamplePreview();
+  const previewBtn = document.getElementById('sample-preview-btn');
+  if (previewBtn) previewBtn.textContent = isKokoro ? '▶ Preview Voice' : '▶ Preview Cloned Voice';
+  const previewStatus = document.getElementById('sample-preview-status');
+  const previewAudio  = document.getElementById('sample-preview-audio');
+  if (previewStatus) previewStatus.textContent = '';
+  if (previewAudio)  { previewAudio.pause(); previewAudio.style.display = 'none'; }
+}
+
+// ─── Preview & Tweak ────────────────────────────────────────────────────────────
+// The "listen before you run" flow for every engine, backed by the same job/SSE
+// machinery as a real conversion: POST /api/preview-job runs one synthetic
+// "chapter" (backend/voices.py PREVIEW_JOB_TEXT) through the real ChapterProcessor
+// (backend/pipeline.py run_preview_job), then GET /api/stream/{job_id} — the
+// exact endpoint a real conversion streams from — reports real chunk-by-chunk
+// progress and logs. That's also what makes Multi-voice/Ambient sound actually
+// run here (same attribute_speakers()/detect_ambience_cues() calls), and lets
+// Stop cancel the job server-side (POST /api/stop/{job_id}) instead of just
+// abandoning a client-side fetch.
+let _samplePreviewURL = null;
+let _sampleJobId = null;
+let _sampleEventSource = null;
+let _sampleLastDesc = '';
+
+function toggleSampleText() {
+  const box = document.getElementById('sample-text-box');
+  const btn = document.getElementById('sample-text-toggle');
+  const showing = box.style.display !== 'none' && box.textContent;
+  if (showing) {
+    box.style.display = 'none';
+    btn.textContent = 'Read the sample text';
+  } else {
+    box.textContent = _sampleText || 'Sample text unavailable.';
+    box.style.display = 'block';
+    btn.textContent = 'Hide the sample text';
+  }
+}
+
+function _sampleLog(text, cls) {
+  const log   = document.getElementById('sample-log');
+  const empty = document.getElementById('sample-log-empty');
+  if (empty) empty.remove();
+  const line = document.createElement('div');
+  line.className = 'sl-line' + (cls ? ' ' + cls : '');
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  line.textContent = '[' + time + '] ' + text;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function _setSampleRunning(running) {
+  document.getElementById('sample-stop-btn').style.display   = running ? 'inline-flex' : 'none';
+  document.getElementById('sample-prog-track').style.display = running ? 'block' : 'none';
+  const fill = document.getElementById('sample-prog-fill');
+  if (running) {
+    // Indeterminate until the job's first ch_start/ch_prog event arrives —
+    // starting the pipeline (loading a model, etc.) has no chunk count yet.
+    fill.classList.add('indeterminate');
+    fill.style.width = '';
+  } else {
+    fill.classList.remove('indeterminate');
+    fill.style.width = '0%';
+  }
+}
+
+function _closeSampleStream() {
+  if (_sampleEventSource) { _sampleEventSource.close(); _sampleEventSource = null; }
+}
+
+function stopSamplePreview() {
+  if (!_sampleJobId) return;
+  const jobId = _sampleJobId;
+  _sampleJobId = null;
+  fetch('/api/stop/' + jobId, { method: 'POST' }).catch(() => {});
+  _closeSampleStream();
+  document.getElementById('sample-preview-status').textContent = 'Stopped.';
+  _sampleLog('Stopped — ' + _sampleLastDesc, 'sl-stop');
+  _setSampleRunning(false);
+}
+
+async function previewSample() {
+  const engine = document.getElementById('engine').value;
+  const status = document.getElementById('sample-preview-status');
+  const audio  = document.getElementById('sample-preview-audio');
+
+  const fd = new FormData();
+  fd.append('engine', engine);
+  let desc = engine;
+
+  if (engine === 'kokoro') {
+    const voice = document.getElementById('voice').value;
+    const speed = document.getElementById('speed').value;
+    fd.append('voice', voice);
+    fd.append('speed', speed);
+    desc = 'kokoro · voice=' + voice + ' · speed=' + speed + '×';
+
+    // Multi-voice/Ambient sound apply to the preview too, exactly as they
+    // will to the real book — same attribute_speakers()/detect_ambience_
+    // cues() LLM calls the conversion uses (backend/pipeline.py run_preview_job).
+    const multiVoice = document.getElementById('multi_voice').checked;
+    const ambience   = document.getElementById('ambience').checked;
+    if (multiVoice || ambience) {
+      const ollamaUrl   = document.getElementById('ollama_url').value.trim() || 'http://localhost:11434';
+      const ollamaModel = document.getElementById('ollama_model').value;
+      fd.append('ollama_url', ollamaUrl);
+      fd.append('ollama_model', ollamaModel);
+      desc += ' · model=' + ollamaModel;
+    }
+    if (multiVoice) { fd.append('multi_voice', 'true'); desc += ' · multi-voice=on'; }
+    if (ambience)   { fd.append('ambience', 'true');    desc += ' · ambience=on'; }
+    const kWorkers = document.getElementById('kokoro_workers').value || '1';
+    if (kWorkers > 1) { fd.append('kokoro_workers', kWorkers); desc += ' · workers=' + kWorkers; }
+  } else {
+    const refInput = document.getElementById('reference_audio');
+    if (!refInput.files || !refInput.files.length) {
+      toast('Upload a reference voice clip first'); return;
+    }
+    fd.append('reference_audio', refInput.files[0]);
+    // Send the raw dropdown value (including 'auto') and let the backend
+    // resolve it, same as the main Convert form (app.js line ~728) — the
+    // /api/preview-job route already does proper mps/cuda/cpu detection
+    // (backend/routes/preview.py). Only really matters for Higgs — Chatterbox
+    // hardcodes device="cpu" regardless of what's sent (see
+    // backend/engines/chatterbox_synth.py's module docstring for why), so
+    // this is a no-op for that engine either way.
+    const device = document.getElementById('device').value;
+    fd.append('device', device);
+    desc += ' · device=' + device;
+
+    if (engine === 'chatterbox') {
+      const cSpeed = document.getElementById('chatterbox_speed').value || '1.0';
+      const cCfg   = document.getElementById('chatterbox_cfg_weight').value || '0.3';
+      const cExag  = document.getElementById('chatterbox_exaggeration').value || '0.7';
+      const cTemp  = document.getElementById('chatterbox_temperature').value || '0.8';
+      const cWorkers = document.getElementById('chatterbox_workers').value || '1';
+      fd.append('chatterbox_speed', cSpeed);
+      fd.append('chatterbox_cfg_weight',   cCfg);
+      fd.append('chatterbox_exaggeration', cExag);
+      fd.append('chatterbox_temperature',  cTemp);
+      fd.append('chatterbox_workers', cWorkers);
+      desc += ' · speed=' + cSpeed + ' · cfg=' + cCfg + ' · exaggeration=' + cExag + ' · temperature=' + cTemp;
+      if (cWorkers > 1) desc += ' · workers=' + cWorkers;
+    }
+
+    // Ambient sound applies regardless of engine in the real conversion (see
+    // backend/chapter_processor.py), so it's tested here too. Multi-voice
+    // stays Kokoro-only — the checkbox is disabled for other engines already.
+    const ambience = document.getElementById('ambience').checked;
+    if (ambience) {
+      const ollamaUrl   = document.getElementById('ollama_url').value.trim() || 'http://localhost:11434';
+      const ollamaModel = document.getElementById('ollama_model').value;
+      fd.append('ambience', 'true');
+      fd.append('ollama_url', ollamaUrl);
+      fd.append('ollama_model', ollamaModel);
+      desc += ' · ambience=on · model=' + ollamaModel;
+    }
+  }
+
+  // Starting a new preview cancels whatever's still running server-side too
+  // — changing a parameter and hitting Preview again doesn't mean waiting
+  // for the old job first. This also logs the old run as "Stopped".
+  stopSamplePreview();
+
+  _sampleLastDesc = desc;
+  _setSampleRunning(true);
+  status.textContent = 'Starting…';
+  audio.style.display = 'none';
+  _sampleLog('Started — ' + desc, 'sl-start');
+
+  let jobId;
+  try {
+    const r = await fetch('/api/preview-job', { method: 'POST', body: fd });
+    if (!r.ok) {
+      let detail = '';
+      try { detail = (await r.json()).detail || ''; } catch(_) {}
+      throw new Error(detail || ('HTTP ' + r.status));
+    }
+    const d = await r.json();
+    jobId = d.job_id;
+    if (d.reference_warnings && d.reference_warnings.length) {
+      toast('Reference clip quality warning — see the log below');
+      d.reference_warnings.forEach(w => _sampleLog('⚠ ' + w, 'sl-err'));
+    }
+  } catch (e) {
+    status.textContent = 'Preview failed: ' + e.message;
+    _sampleLog('Failed — ' + desc + ': ' + e.message, 'sl-err');
+    _setSampleRunning(false);
+    return;
+  }
+
+  _sampleJobId = jobId;
+  _connectSampleStream(jobId, desc);
+}
+
+function _connectSampleStream(jobId, desc) {
+  const status = document.getElementById('sample-preview-status');
+  const audio  = document.getElementById('sample-preview-audio');
+  const fill   = document.getElementById('sample-prog-fill');
+  let totalChunks = 0;
+
+  _closeSampleStream();
+  const es = new EventSource('/api/stream/' + jobId);
+  _sampleEventSource = es;
+
+  es.onmessage = e => {
+    let m;
+    try { m = JSON.parse(e.data); } catch(_) { return; }
+
+    if (m.type === 'log') {
+      const line = m.msg.trim();
+      if (line) _sampleLog(line);
+    } else if (m.type === 'status') {
+      status.textContent = m.msg;
+    } else if (m.type === 'ch_start') {
+      totalChunks = m.chunks || 0;
+      fill.classList.remove('indeterminate');
+      fill.style.width = '0%';
+      status.textContent = totalChunks ? 'Synthesizing — 0/' + totalChunks + ' chunks…' : 'Synthesizing…';
+    } else if (m.type === 'ch_prog') {
+      const pct = Math.round((m.pct || 0) * 100);
+      fill.style.width = pct + '%';
+      const doneChunks = totalChunks ? Math.round((m.pct || 0) * totalChunks) : 0;
+      status.textContent = totalChunks
+        ? 'Synthesizing — ' + doneChunks + '/' + totalChunks + ' chunks (' + pct + '%)…'
+        : 'Synthesizing — ' + pct + '%…';
+    } else if (m.type === 'file') {
+      fetch('/api/download/' + jobId + '/' + encodeURIComponent(m.filename))
+        .then(r => r.ok ? r.blob() : Promise.reject(new Error('HTTP ' + r.status)))
+        .then(blob => {
+          if (_samplePreviewURL) URL.revokeObjectURL(_samplePreviewURL);
+          _samplePreviewURL = URL.createObjectURL(blob);
+          audio.src = _samplePreviewURL;
+          audio.style.display = '';
+          audio.play().catch(() => {});
+        })
+        .catch(err => _sampleLog('Failed to fetch finished audio: ' + err.message, 'sl-err'));
+    } else if (m.type === 'done') {
+      _closeSampleStream();
+      _sampleJobId = null;
+      status.textContent = 'Playing the shared sample.';
+      _sampleLog('Done — ' + desc, 'sl-done');
+      _setSampleRunning(false);
+    }
+  };
+
+  es.onerror = () => {
+    // Stop() already closes the stream and logs "Stopped" itself, so only
+    // treat this as a real failure if we're still tracking this job.
+    if (_sampleJobId === jobId) {
+      _sampleJobId = null;
+      status.textContent = 'Preview failed: connection lost.';
+      _sampleLog('Failed — ' + desc + ': connection lost', 'sl-err');
+    }
+    _closeSampleStream();
+    _setSampleRunning(false);
+  };
+}
+
+// ─── Auto-tune this voice ───────────────────────────────────────────────────────
+// Opt-in (button, not automatic on upload): samples a handful of Chatterbox/
+// Higgs parameter combos via Latin Hypercube Sampling, synthesizes the same
+// short sample text with each against the uploaded reference clip in
+// parallel, scores every candidate with DNSMOS (backend/voice_tuning.py),
+// and reports the ranked results. Same job/SSE machinery as Preview & Tweak.
+let _autotuneJobId = null;
+let _autotuneEventSource = null;
+let _autotuneLiveCandidates = [];   // accumulated as autotune_candidate_result messages arrive
+
+function _autotuneLog(text, cls) {
+  const log     = document.getElementById('autotune-log');
+  const wrap    = document.getElementById('autotune-log-wrap');
+  wrap.style.display = 'block';
+  const line = document.createElement('div');
+  line.className = 'sl-line' + (cls ? ' ' + cls : '');
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  line.textContent = '[' + time + '] ' + text;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function _setAutotuneRunning(running) {
+  document.getElementById('autotune-btn').disabled = running;
+  document.getElementById('autotune-stop-btn').style.display = running ? 'inline-flex' : 'none';
+  document.getElementById('autotune-prog-track').style.display = running ? 'block' : 'none';
+  if (running) {
+    document.getElementById('autotune-results').style.display = 'none';
+    _autotuneLiveCandidates = [];
+  }
+}
+
+async function startAutotune() {
+  const engine = document.getElementById('engine').value;
+  if (engine !== 'chatterbox') {
+    toast('Auto-tune only applies to Chatterbox — switch engine first'); return;
+  }
+  const refInput = document.getElementById('reference_audio');
+  if (!refInput.files || !refInput.files.length) {
+    toast('Upload a reference voice clip first'); return;
+  }
+
+  const fd = new FormData();
+  fd.append('engine', engine);
+  fd.append('reference_audio', refInput.files[0]);
+  let device = document.getElementById('device').value;
+  fd.append('device', device);
+  fd.append('chatterbox_workers', document.getElementById('chatterbox_workers').value || '1');
+
+  _setAutotuneRunning(true);
+  document.getElementById('autotune-status').textContent = 'Starting…';
+  _autotuneLog('Started — ' + engine + ' · device=' + device, 'sl-start');
+
+  let jobId;
+  try {
+    const r = await fetch('/api/autotune-job', { method: 'POST', body: fd });
+    if (!r.ok) {
+      let detail = '';
+      try { detail = (await r.json()).detail || ''; } catch(_) {}
+      throw new Error(detail || ('HTTP ' + r.status));
+    }
+    const d = await r.json();
+    jobId = d.job_id;
+  } catch (e) {
+    document.getElementById('autotune-status').textContent = 'Auto-tune failed: ' + e.message;
+    _autotuneLog('Failed: ' + e.message, 'sl-err');
+    _setAutotuneRunning(false);
+    return;
+  }
+
+  _autotuneJobId = jobId;
+  _connectAutotuneStream(jobId, engine);
+}
+
+function stopAutotune() {
+  if (!_autotuneJobId) return;
+  const jobId = _autotuneJobId;
+  _autotuneJobId = null;
+  fetch('/api/stop/' + jobId, { method: 'POST' }).catch(() => {});
+  if (_autotuneEventSource) { _autotuneEventSource.close(); _autotuneEventSource = null; }
+  document.getElementById('autotune-status').textContent = 'Stopped.';
+  _autotuneLog('Stopped by user', 'sl-stop');
+  _setAutotuneRunning(false);
+}
+
+function _connectAutotuneStream(jobId, engine) {
+  const status = document.getElementById('autotune-status');
+  const fill   = document.getElementById('autotune-prog-fill');
+  let totalCandidates = 0;
+
+  if (_autotuneEventSource) _autotuneEventSource.close();
+  const es = new EventSource('/api/stream/' + jobId);
+  _autotuneEventSource = es;
+
+  es.onmessage = e => {
+    let m;
+    try { m = JSON.parse(e.data); } catch(_) { return; }
+
+    if (m.type === 'log') {
+      const line = m.msg.trim();
+      if (line) _autotuneLog(line);
+    } else if (m.type === 'status') {
+      status.textContent = m.msg;
+    } else if (m.type === 'ch_start') {
+      totalCandidates = m.chunks || 0;
+    } else if (m.type === 'ch_prog') {
+      const pct = Math.round((m.pct || 0) * 100);
+      const doneN = totalCandidates ? Math.round((m.pct || 0) * totalCandidates) : 0;
+      status.textContent = totalCandidates
+        ? 'Synthesizing — ' + doneN + '/' + totalCandidates + ' candidates (' + pct + '%)…'
+        : 'Synthesizing — ' + pct + '%…';
+    } else if (m.type === 'autotune_candidate_result') {
+      _autotuneLiveCandidates.push({ params: m.params, score: m.score, filename: m.filename });
+      _renderAutotuneCandidates(_autotuneLiveCandidates, m.best_score, jobId, engine, /*live=*/true);
+      status.textContent = 'Synthesizing — ' + _autotuneLiveCandidates.length + '/' +
+        (totalCandidates || '?') + ' candidates · best so far ' + m.best_score.toFixed(2) + '…';
+    } else if (m.type === 'autotune_result') {
+      _renderAutotuneCandidates(m.candidates, m.winner.score, jobId, engine, /*live=*/false);
+      _applyAutotuneParams(m.winner.params, engine);
+      toast('Auto-tune done — best-scoring settings applied (score ' + m.winner.score.toFixed(2) + ')');
+    } else if (m.type === 'done') {
+      if (_autotuneEventSource) { _autotuneEventSource.close(); _autotuneEventSource = null; }
+      _autotuneJobId = null;
+      status.textContent = 'Done.';
+      _autotuneLog('Done', 'sl-done');
+      _setAutotuneRunning(false);
+    }
+  };
+
+  es.onerror = () => {
+    if (_autotuneJobId === jobId) {
+      _autotuneJobId = null;
+      status.textContent = 'Auto-tune failed: connection lost.';
+      _autotuneLog('Failed: connection lost', 'sl-err');
+    }
+    if (_autotuneEventSource) { _autotuneEventSource.close(); _autotuneEventSource = null; }
+    _setAutotuneRunning(false);
+  };
+}
+
+// Renders the results panel from whatever candidates have scored so far —
+// called both incrementally (live=true, as each autotune_candidate_result
+// streams in — the list grows and the ranking/BEST badge can reshuffle
+// candidate to candidate) and once authoritatively at the end (live=false,
+// from the final autotune_result, which also auto-fills the winner's
+// settings). Sorts every call, so the DOM always reflects current ranking
+// regardless of the (out-of-order, worker-dependent) arrival order.
+function _renderAutotuneCandidates(candidates, bestScore, jobId, engine, live) {
+  const box = document.getElementById('autotune-results');
+  box.innerHTML = '';
+  box.style.display = 'block';
+
+  const sorted = [...candidates].sort((a, b) => b.score - a.score);
+
+  const heading = document.createElement('div');
+  heading.style.cssText = 'font-size:.73rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-s);margin-bottom:8px';
+  heading.textContent = live
+    ? 'Results so far (' + sorted.length + ' scored, still running) — ranked by predicted naturalness'
+    : 'Results — ranked by predicted naturalness';
+  box.appendChild(heading);
+
+  sorted.forEach((c, idx) => {
+    const isBest = c.score === bestScore;
+    const card = document.createElement('div');
+    card.style.cssText = 'padding:10px 12px;border-radius:10px;margin-bottom:8px;background:rgba(255,255,255,.03);border:1px solid ' +
+      (isBest ? 'var(--success)' : 'rgba(255,255,255,.06)');
+
+    const paramStr = Object.entries(c.params).map(([k, v]) =>
+      k + '=' + (typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(2)) : v)).join(' · ');
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap';
+    row.innerHTML =
+      '<span style="font-weight:700">#' + (idx + 1) + '</span>' +
+      (isBest ? '<span style="font-size:.65rem;font-weight:800;letter-spacing:.06em;color:var(--success);background:rgba(52,211,153,.12);padding:2px 6px;border-radius:4px">BEST</span>' : '') +
+      '<span style="font-size:.8rem;color:var(--txt-m)">score ' + c.score.toFixed(2) + '</span>' +
+      '<span style="font-size:.73rem;color:var(--txt-s);font-family:monospace">' + paramStr + '</span>';
+    card.appendChild(row);
+
+    const audio = document.createElement('audio');
+    audio.controls = true;
+    audio.style.cssText = 'width:100%;height:32px;margin-top:6px';
+    audio.src = '/api/download/' + jobId + '/' + encodeURIComponent(c.filename);
+    card.appendChild(audio);
+
+    const useBtn = document.createElement('button');
+    useBtn.type = 'button';
+    useBtn.className = 'btn-sm';
+    useBtn.style.marginTop = '6px';
+    useBtn.textContent = (isBest && !live) ? '✓ Use these settings (applied)' : 'Use these settings';
+    useBtn.onclick = () => _applyAutotuneParams(c.params, engine);
+    card.appendChild(useBtn);
+
+    box.appendChild(card);
+  });
+}
+
+function _applyAutotuneParams(params, engine) {
+  if (engine === 'chatterbox') {
+    if ('cfg_weight' in params) document.getElementById('chatterbox_cfg_weight').value = params.cfg_weight.toFixed(2);
+    if ('temperature' in params) document.getElementById('chatterbox_temperature').value = params.temperature.toFixed(2);
+  }
+}
+
+function showReferenceAudio() {
+  const input  = document.getElementById('reference_audio');
+  const status = document.getElementById('reference-audio-status');
+  if (!input.files || !input.files.length) { status.textContent = ''; return; }
+  const f = input.files[0];
+  status.textContent = f.name + '  (' + fmtBytes(f.size) + ')';
+}
+
 // ─── Format toggle ────────────────────────────────────────────────────────────
 function onFormatChange() {
   const fmt = document.querySelector('input[name="output_format"]:checked').value;
@@ -281,7 +1065,13 @@ function onFormatChange() {
 // ─── Start ────────────────────────────────────────────────────────────────────
 async function startJob() {
   if (!fileInput.files || fileInput.files.length === 0) {
-    toast('Please select at least one EPUB file'); return;
+    toast('Please select at least one EPUB or TXT file'); return;
+  }
+
+  const engine = document.getElementById('engine').value;
+  const refInput = document.getElementById('reference_audio');
+  if (engine !== 'kokoro' && (!refInput.files || !refInput.files.length)) {
+    toast('Upload a reference voice clip to clone for this engine'); return;
   }
 
   const fd = new FormData();
@@ -297,13 +1087,28 @@ async function startJob() {
   fd.append('min_ch_len',    document.getElementById('min_ch_len').value);
   fd.append('output_format',   document.querySelector('input[name="output_format"]:checked').value);
   fd.append('bitrate',         document.getElementById('bitrate').value);
-  fd.append('custom_out_dir',  document.getElementById('out_dir').value.trim());
+  // A device-folder handle is a browser-side concept only — the container
+  // has no use for its display name as a server path, so don't send one; the
+  // server just uses its own default location, and saveFileToDevice() copies
+  // each finished file into the chosen folder as it completes (see below).
+  fd.append('custom_out_dir', _deviceDirHandle ? '' : document.getElementById('out_dir').value.trim());
   fd.append('chapter_indices', _getChapterIndices());
   fd.append('enhance',         document.getElementById('enhance').checked);
   fd.append('multi_voice',     document.getElementById('multi_voice').checked);
   fd.append('ambience',        document.getElementById('ambience').checked);
   fd.append('ollama_url',      document.getElementById('ollama_url').value.trim());
   fd.append('ollama_model',    document.getElementById('ollama_model').value);
+  fd.append('engine',          engine);
+  if (engine === 'kokoro') { fd.append('kokoro_workers', document.getElementById('kokoro_workers').value || '1'); }
+  if (engine !== 'kokoro') { fd.append('reference_audio', refInput.files[0]); }
+  if (engine === 'chatterbox') {
+    fd.append('chatterbox_workers', document.getElementById('chatterbox_workers').value || '1');
+    fd.append('chatterbox_speed',   document.getElementById('chatterbox_speed').value || '1.0');
+    fd.append('chatterbox_cfg_weight',   document.getElementById('chatterbox_cfg_weight').value || '0.3');
+    fd.append('chatterbox_exaggeration', document.getElementById('chatterbox_exaggeration').value || '0.7');
+    fd.append('chatterbox_temperature',  document.getElementById('chatterbox_temperature').value || '0.8');
+    fd.append('chatterbox_breaths',      document.getElementById('chatterbox_breaths').checked);
+  }
 
   switchToOutput();
   resetOutput();
@@ -327,6 +1132,10 @@ async function startJob() {
     const d = await r.json();
 
     batchJobIds = d.job_ids;
+
+    if (d.reference_warnings && d.reference_warnings.length) {
+      toast('Reference clip quality warning — see the log for details');
+    }
 
     if (batchJobIds.length === 1) {
       // Single-book path — use existing log+files UI unchanged
@@ -360,7 +1169,13 @@ function handleMsg(m) {
   }
   else if (m.type === 'status')   setStatus(m.msg);
   else if (m.type === 'progress') setProg(m.value, m.label);
-  else if (m.type === 'file')     { addFile(m); if (m.chapter > 0) _chDone(m.chapter - 1, m.duration); }
+  else if (m.type === 'file')     {
+    addFile(m);
+    if (m.chapter > 0) _chDone(m.chapter - 1, m.duration);
+    if (_deviceDirHandle) {
+      saveFileToDevice(jobId, m.filename).then(ok => { if (ok) toast('Saved "' + m.filename + '" to your device'); });
+    }
+  }
   else if (m.type === 'done')     onDone(m.files);
   else if (m.type === 'ch_info')  _initChGrid(m.chapters);
   else if (m.type === 'ch_start') _chStart(m.ch_i, m.chunks);
@@ -425,6 +1240,7 @@ function handleBatchMsg(id, m) {
     s.files.push(m);
     s.totalDur += (m.duration || 0);
     updateBookCard(id);
+    if (_deviceDirHandle) saveFileToDevice(id, m.filename);
   } else if (m.type === 'done') {
     if (batchSources[id]) { batchSources[id].close(); delete batchSources[id]; }
     s.status    = 'done';
@@ -712,6 +1528,8 @@ function addLog(raw, cls) {
 function addFile(f) {
   const list  = document.getElementById('file-list');
   if (!list) return;
+  const card = document.getElementById('files-card');
+  if (card) card.style.display = 'block';
   const empty = list.querySelector('.empty');
   if (empty) empty.remove();
 
@@ -765,14 +1583,16 @@ function resetOutput() {
   if (olSum)  olSum.textContent = '';
 
   // Clear batch grid, hide out-path card, wipe log + file-list content
-  const outGrid  = document.getElementById('out-grid');
-  const pathCard = document.getElementById('out-path-card');
-  const logEl    = document.getElementById('log');
-  const flEl     = document.getElementById('file-list');
-  if (outGrid)  { outGrid.className = 'out-grid'; outGrid.innerHTML = ''; }
-  if (pathCard) pathCard.style.display = 'none';
-  if (logEl)    logEl.innerHTML  = '';
-  if (flEl)     flEl.innerHTML   = '';
+  const outGrid   = document.getElementById('out-grid');
+  const pathCard  = document.getElementById('out-path-card');
+  const logEl     = document.getElementById('log');
+  const flEl      = document.getElementById('file-list');
+  const filesCard = document.getElementById('files-card');
+  if (outGrid)   { outGrid.className = 'out-grid'; outGrid.innerHTML = ''; }
+  if (pathCard)  pathCard.style.display = 'none';
+  if (logEl)     logEl.innerHTML  = '';
+  if (flEl)      flEl.innerHTML   = '';
+  if (filesCard) filesCard.style.display = 'none';
   setProg(0, '');
 }
 

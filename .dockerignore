@@ -11,8 +11,20 @@ epub_to_audiobook.py
 # Sample EPUB / output — don't bloat the image
 *.epub
 audiobook_output/
-# Python env
+# Python envs — .venv-higgs/.venv-chatterbox are multi-GB, host-only
+# (Higgs/Chatterbox are deliberately not bundled into the image, see README)
 .venv/
+.venv-higgs/
+.venv-chatterbox/
 env/
 venv/
 *.egg-info/
+# Test fixtures/output, IDE state, misc dev tooling — none of it is COPY'd
+# into the image, so keep it out of the build context entirely
+tests/
+.idea/
+.vtcode/
+vtcode.toml
+.claude/
+docker-compose.yml
+Dockerfile*

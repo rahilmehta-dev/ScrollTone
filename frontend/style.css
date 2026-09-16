@@ -2,30 +2,105 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
 /* ── Variables ───────────────────────────────────────────────────────────── */
+/* "Now Playing" system: an immersive warm atmosphere behind frosted glass
+   panels, replacing the flat neumorphic dark. --r/--r-i/--r-s keep their
+   names (every component below still composes them) but now describe a
+   glass panel's shadow instead of a pressed-plastic one, and --surface/
+   --well are translucent so the atmosphere glow behind the page shows
+   through — that's what makes it read as glass rather than a recolor. */
 :root{
-  --bg:        rgb(36,36,42);
-  --surface:   rgb(36,36,42);
-  /* Input wells are noticeably darker — the key to readable neumorphic fields */
-  --well:      rgb(26,26,32);
+  --bg:        #150d14;
+  --surface:   rgba(255,255,255,.05);
+  --well:      rgba(0,0,0,.28);
 
-  /* Neumorphic shadows — tuned for rgb(36,36,42) */
-  --r:  -5px -5px 14px rgba(255,255,255,.06),  6px 6px 20px rgba(0,0,0,.7);
-  --r-s:-3px -3px  8px rgba(255,255,255,.05),  4px 4px 12px rgba(0,0,0,.65);
-  --r-i: inset -3px -3px 8px rgba(255,255,255,.05), inset 5px 5px 16px rgba(0,0,0,.75);
+  /* Glass shadows — soft real depth instead of a raised/pressed plastic pair */
+  --r:  0 1px 0 rgba(255,255,255,.07) inset, 0 24px 46px -22px rgba(0,0,0,.6);
+  --r-s:0 1px 0 rgba(255,255,255,.06) inset, 0 12px 26px -16px rgba(0,0,0,.55);
+  --r-i: inset 0 2px 6px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.04);
 
-  --accent:   #7c3aed;
-  --accent-b: #6d28d9;
-  --accent-lo:rgba(124,58,237,.22);
-  --success:  #10b981;
-  --danger:   #ef4444;
-  --warning:  #f59e0b;
+  /* Hue driving every accent/button color in the app (degrees, no unit) —
+     buttons, toggles, badges, and the atmosphere's primary glow all read
+     from this one number, so _setAtmosphere() in app.js only ever writes
+     this one property and every rule below recomputes on its own (plain
+     var() substitution, not an animation, so no @property needed here —
+     that's reserved for --atmo-a/b/c, which *do* crossfade). --hue-b is
+     the atmosphere's secondary glow hue only; nothing interactive reads
+     it, so a two-hue cover doesn't produce two different button colors. */
+  --hue-a: 17;
+  --hue-b: 340;
 
-  --txt:  rgba(255,255,255,.92);
-  --txt-m:rgba(255,255,255,.55);   /* labels — bumped up for readability */
-  --txt-s:rgba(255,255,255,.30);
+  --accent:          hsl(var(--hue-a) 100% 68%);
+  --accent-b:        hsl(var(--hue-a) 64% 51%);
+  --accent-light:    hsl(var(--hue-a) 100% 76%);
+  --accent-lightest: hsl(var(--hue-a) 100% 84%);
+  --accent-lo:       hsl(var(--hue-a) 100% 68% / .22);
+  --success:  #34d399;
+  --danger:   #ff6b57;
+  --warning:  #f5b955;
 
-  --radius:16px;
-  --radius-s:11px;
+  --txt:  #fbf7f2;
+  --txt-m:rgba(251,247,242,.66);   /* labels */
+  --txt-s:rgba(251,247,242,.46);
+
+  --radius:18px;
+  --radius-s:13px;
+
+  /* Atmosphere colors — ScrollTone's own warm identity by default, replaced
+     with hues sampled from the current book's cover by
+     _updateAtmosphereFromCover() in app.js (Canvas pixel sampling, no
+     server round-trip). Declared as custom properties, not literals, so
+     that swap can happen live. */
+  --atmo-a: #e8734a;
+  --atmo-b: #a83b52;
+  --atmo-c: #3d1f3a;
+
+  /* Definition ring — a hairline border glass surfaces otherwise lack,
+     added for affordance (blur-only edges are hard to place for
+     low-vision users). Subtle enough not to flatten the glass look. */
+  --edge: inset 0 0 0 1px rgba(255,255,255,.09);
+
+  /* A literary serif for the wordmark and any place content itself (a book
+     title) needs warmth against the clean sans UI chrome. System stack
+     only — this app is meant to run fully offline. */
+  --font-display:ui-serif,Georgia,Cambria,'Times New Roman',serif;
+}
+
+/* ── Atmosphere ──────────────────────────────────────────────────────────
+   The one exciting, non-decorative move: a soft immersive glow behind
+   every screen — the same idea as Apple Music's Now Playing background,
+   except here it's genuinely derived from the current book's cover
+   (app.js samples the cover image on a canvas and writes hues into
+   --atmo-a/b/c), not a fixed brand color. @property registers each as an
+   animatable <color> so the swap between books crossfades instead of
+   snapping — browsers without @property support just snap instead, which
+   is a harmless fallback, not a broken one. */
+@property --atmo-a{ syntax:'<color>'; inherits:true; initial-value:#e8734a; }
+@property --atmo-b{ syntax:'<color>'; inherits:true; initial-value:#a83b52; }
+@property --atmo-c{ syntax:'<color>'; inherits:true; initial-value:#3d1f3a; }
+body::before{
+  content:'';position:fixed;inset:0;z-index:-2;
+  background:
+    radial-gradient(ellipse 900px 700px at 15% -10%, var(--atmo-a), transparent 60%),
+    radial-gradient(ellipse 800px 800px at 100% 15%, var(--atmo-b), transparent 55%),
+    radial-gradient(ellipse 1000px 900px at 40% 115%, var(--atmo-c), transparent 60%),
+    var(--bg);
+  filter:blur(60px) saturate(1.25);
+  opacity:.8;
+  transition:--atmo-a 1.1s ease, --atmo-b 1.1s ease, --atmo-c 1.1s ease;
+}
+body::after{
+  content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.045;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Neumorphism 2.0: visible keyboard focus ring on every interactive control.
+   Soft-shadow surfaces have almost no affordance on their own, so :hover
+   alone (the only state most of this system originally styled) leaves
+   keyboard users with no indication of where they are. */
+:is(button,select,input,a,[tabindex]):focus-visible{
+  outline:2px solid var(--accent-light);
+  outline-offset:2px;
+  border-radius:8px;
 }
 
 /* ── Body ────────────────────────────────────────────────────────────────── */
@@ -48,19 +123,20 @@ body{
   display:inline-flex;align-items:center;gap:18px;
   padding:14px 32px;
   border-radius:16px;
+  background:linear-gradient(165deg, rgba(255,255,255,.07), rgba(255,255,255,.02));
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
   animation:brandIn .7s cubic-bezier(.22,1,.36,1) both;
-  box-shadow:
-    inset -4px -4px 10px rgba(255,255,255,.07),
-    inset 5px  5px  18px rgba(0,0,0,.65);
+  box-shadow:var(--r-i);
 }
 .brand-name{
-  font-size:2rem;font-weight:900;letter-spacing:-.05em;
-  color:rgba(255,255,255,.78);
+  font-family:var(--font-display);
+  font-size:2rem;font-weight:700;letter-spacing:-.02em;
+  color:rgba(255,255,255,.82);
   line-height:1;
 }
 .brand-name em{
   font-style:normal;
-  color:#9d6fff;
+  color:var(--accent);
 }
 .brand-sep{
   width:1px;height:28px;
@@ -80,7 +156,7 @@ body{
 }
 .brand-version{
   font-size:.58rem;font-weight:700;letter-spacing:.1em;
-  color:rgba(124,58,237,.45);margin-top:2px;
+  color:hsl(var(--hue-a) 78% 60% / .45);margin-top:2px;
 }
 
 /* Stop App button */
@@ -104,63 +180,84 @@ body{
 /* ── Layout ──────────────────────────────────────────────────────────────── */
 main{
   position:relative;z-index:1;
-  max-width:none;
+  max-width:1200px;margin:0 auto;
   padding:0 32px 32px;
 }
-main.has-job{ max-width:none; }
 
-/* ── Desktop: true two-column app layout ─────────────────────────────────── */
+/* ── Desktop: one centered column while setting up, two columns once a
+   job is running (settings alongside live output/progress). ── */
 @media(min-width:960px){
-  main{
+  main{ display:block; }
+  main.has-job{
     display:grid;
     grid-template-columns:1.15fr 0.85fr;
     column-gap:20px;
     align-items:start;
   }
-  .brand{ grid-column:1/-1; }
-  #left{ grid-column:1; }
-  .out-sticky{
+  main.has-job .brand{ grid-column:1/-1; }
+  main.has-job #left{ grid-column:1; }
+  main.has-job .out-sticky{
     grid-column:2;
-    display:block!important;  /* always visible on desktop */
     position:sticky;top:20px; /* stays in view while settings scroll */
   }
   .btn-back{ display:none!important; }   /* no panel-switching on desktop */
   #job-banner{ display:none!important; }
-  .adv-grid{ grid-template-columns:repeat(2,1fr); } /* 3-col → 2-col in narrower right panel */
 }
 
 @media(max-width:900px){main{padding:0 16px 24px}.brand{padding:28px 0 22px}.brand-name{font-size:1.5rem}.brand-inset{padding:14px 24px;gap:14px}}
 
-/* 2-column settings grid */
-.left-grid{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:18px;
-  align-items:stretch;
-  margin-bottom:18px;
-}
-.col{display:flex;flex-direction:column;gap:14px}
+/* ── Wizard pages ────────────────────────────────────────────────────────── */
+/* Page 1 (Book) and page 2 (Voice & Model) — one visible at a time, cards
+   stacked vertically within whichever page is showing. */
+.wizard-page{display:flex;flex-direction:column;gap:14px;margin-bottom:18px}
+.wizard-page .card{display:flex;flex-direction:column}
+.wizard-page .card:nth-child(1){animation-delay:.04s}
+.wizard-page .card:nth-child(2){animation-delay:.1s}
+.wizard-page .card:nth-child(3){animation-delay:.16s}
+.wizard-page .card:nth-child(4){animation-delay:.22s}
 
-/* Cards in the grid */
-.left-grid>.col>.card{
-  display:flex;flex-direction:column;
-}
+/* Book page: upload zone grows to fill available height */
+#page-1 .card .field:first-child{flex:1;display:flex;flex-direction:column}
+#page-1 .card .field:first-child .upload-zone{flex:1;min-height:120px}
 
-/* Left card: upload zone grows to fill the gap */
-.left-grid>.col:first-child>.card>.field:first-child{
-  flex:1;display:flex;flex-direction:column;
+/* Section divider for the single continuous page — replaces what used to
+   be a wizard page title, now just a marker as you scroll past. */
+.sect-hdr{
+  display:flex;align-items:center;gap:9px;
+  font-size:1.05rem;font-weight:800;color:var(--txt);
+  margin:6px 0 2px;
 }
-.left-grid>.col:first-child>.card>.field:first-child .upload-zone{
-  flex:1;min-height:120px;
-}
+.sect-hdr .sect-ico{font-size:1.1rem}
+.sect-hdr:first-of-type{margin-top:0}
 
-/* Right card: natural height, no forced spacing */
-.left-grid>.col:last-child>.card{
-  justify-content:flex-start;
+/* ── Cover strip — the real book, once we have it. A compact version of
+   the hero moment from the concept design: a genuine cover thumbnail
+   (extracted server-side from the EPUB) plus title/author, no extra copy
+   around it. Glass, like everything else, so it sits naturally in the
+   atmosphere instead of announcing itself. ── */
+.cover-strip{
+  display:flex;align-items:center;gap:14px;
+  padding:12px 18px 12px 12px;border-radius:var(--radius);
+  background:linear-gradient(165deg, rgba(255,255,255,.08), rgba(255,255,255,.02)), var(--surface);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  box-shadow:var(--r-s),var(--edge);
+  margin-bottom:4px;
+  animation:fadeUp .4s ease both;
 }
-@media(max-width:700px){
-  .left-grid{grid-template-columns:1fr}
+.cover-thumb{
+  width:52px;height:76px;flex-shrink:0;border-radius:5px;overflow:hidden;position:relative;
+  background:linear-gradient(155deg,#c65b3f,#7c2f3f);
+  box-shadow:0 8px 16px -6px rgba(0,0,0,.6);
+  display:flex;align-items:center;justify-content:center;
 }
+.cover-thumb img{width:100%;height:100%;object-fit:cover}
+#cover-thumb-fallback{font-size:1.5rem;filter:grayscale(.15) opacity(.85)}
+.cover-strip-txt{min-width:0}
+.cover-strip-title{
+  font-family:var(--font-display);font-weight:700;font-size:1rem;color:var(--txt);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.cover-strip-author{font-size:.78rem;color:var(--txt-s);margin-top:2px}
 
 /* ── Left panel transitions ──────────────────────────────────────────────── */
 #left.slide-out{
@@ -173,20 +270,18 @@ main.has-job{ max-width:none; }
 
 /* ── Neumorphic Card ─────────────────────────────────────────────────────── */
 .card{
-  background:var(--surface);border-radius:var(--radius);
+  background:linear-gradient(165deg, rgba(255,255,255,.09), rgba(255,255,255,.025)), var(--surface);
+  backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);
+  border-radius:var(--radius);
   padding:20px 22px;
-  box-shadow:var(--r);
+  box-shadow:var(--r),var(--edge);
   animation:fadeUp .5s ease both;
   transition:box-shadow .25s ease;
 }
 @keyframes fadeUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
 @keyframes brandIn{from{opacity:0;transform:translateY(-12px) scale(.96)}to{opacity:1;transform:none}}
 @keyframes brandFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
-/* Stagger cards in each column */
-.col .card:nth-child(1){animation-delay:.04s}
-.col .card:nth-child(2){animation-delay:.14s}
-.col:last-child .card:nth-child(1){animation-delay:.08s}
-.col:last-child .card:nth-child(2){animation-delay:.18s}
+/* Stagger cards in the output panel */
 .out-sticky .card:nth-child(1){animation-delay:.05s}
 .out-sticky .card:nth-child(2){animation-delay:.1s}
 .out-sticky .card:nth-child(3){animation-delay:.15s}
@@ -195,7 +290,27 @@ main.has-job{ max-width:none; }
 .sect{
   font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;
   color:var(--txt-m);margin-bottom:14px;
+  display:flex;align-items:center;gap:8px;
 }
+.sect .sect-ico{
+  font-size:1rem;line-height:1;text-transform:none;letter-spacing:0;
+  filter:grayscale(.15);
+}
+
+/* Small inline text-link button (e.g. "Read the sample text") */
+.link-btn{
+  background:none;border:none;padding:0;margin-left:6px;
+  font-size:.78rem;font-weight:600;color:var(--accent-light);
+  cursor:pointer;text-decoration:underline;text-underline-offset:2px;
+}
+.link-btn:hover{color:var(--accent-lightest)}
+
+#sample-text-box{
+  font-size:.78rem;color:var(--txt-s);line-height:1.65;font-style:italic;
+  background:var(--well);border-radius:10px;padding:12px 14px;
+  margin-bottom:12px;box-shadow:var(--r-i);
+}
+
 /* Divider */
 .div{height:1px;background:rgba(255,255,255,.05);margin:14px 0}
 
@@ -209,10 +324,12 @@ main.has-job{ max-width:none; }
   box-shadow:inset -4px -4px 10px rgba(255,255,255,.05),inset 5px 5px 16px rgba(0,0,0,.75);
 }
 .upload-zone.has-file{
+  padding:18px 24px;
   box-shadow:inset -3px -3px 7px rgba(255,255,255,.04),
              inset 4px 4px 13px rgba(0,0,0,.72),
              0 0 0 1px rgba(16,185,129,.25);
 }
+.upload-zone.has-file .up-icon{font-size:1.4rem;margin-bottom:5px}
 .up-icon{font-size:2.1rem;margin-bottom:9px;display:block;transition:transform .25s}
 @keyframes iconBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
 .upload-zone:hover .up-icon,.upload-zone.drag-over .up-icon{animation:iconBob .7s ease-in-out infinite}
@@ -279,16 +396,22 @@ select{
 select option{background:rgb(22,22,28);color:var(--txt)}
 select:focus,input[type=number]:focus,input[type=text]:focus{
   background:rgb(30,30,36);
-  box-shadow:var(--r-i),0 0 0 2px rgba(124,58,237,.5);
+  box-shadow:var(--r-i),0 0 0 2px hsl(var(--hue-a) 78% 60% / .5);
 }
 select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,30,36)}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+@media(max-width:760px){.grid2{grid-template-columns:1fr}}
 
-/* ── Settings checkboxes in Voice card ──────────────────────────────────── */
+/* ── Settings checkboxes — now inside the narrower half-width Sound card,
+   so a single column (matching the approved design) reads better than the
+   old 2-up grid, which was tuned for the card being full page width. ── */
 .settings-checks{
-  display:grid;grid-template-columns:1fr 1fr;
+  display:grid;grid-template-columns:1fr;
   gap:12px 16px;
   margin-top:4px;
+}
+@media(max-width:560px){
+  .settings-checks{grid-template-columns:1fr}
 }
 
 /* ── Checkbox ────────────────────────────────────────────────────────────── */
@@ -304,7 +427,7 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 }
 .chk input[type=checkbox]:checked{
   background:var(--accent);
-  box-shadow:var(--r-i),0 0 10px rgba(124,58,237,.4);
+  box-shadow:var(--r-i),0 0 10px hsl(var(--hue-a) 78% 60% / .4);
 }
 .chk input[type=checkbox]:checked::after{
   content:'✓';position:absolute;inset:0;
@@ -315,7 +438,7 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 /* ── Speed Slider ────────────────────────────────────────────────────────── */
 .speed-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .speed-val{
-  font-size:1.1rem;font-weight:800;color:#8b5cf6;
+  font-size:1.1rem;font-weight:800;color:var(--accent);
   transition:transform .15s ease,opacity .15s ease;
 }
 .speed-val.bump{animation:valBump .2s ease both}
@@ -330,15 +453,15 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 }
 .speed-row input[type=range]::-webkit-slider-thumb{
   -webkit-appearance:none;width:22px;height:22px;border-radius:50%;
-  background:linear-gradient(135deg,#8b5cf6,#6d28d9);cursor:pointer;
+  background:linear-gradient(135deg,var(--accent),var(--accent-b));cursor:pointer;
   box-shadow:-3px -3px 6px rgba(255,255,255,.08),4px 4px 10px rgba(0,0,0,.6),
-             0 0 14px rgba(124,58,237,.5);
+             0 0 14px hsl(var(--hue-a) 78% 60% / .5);
   transition:box-shadow .2s,transform .15s;
 }
 .speed-row input[type=range]::-webkit-slider-thumb:hover{
   transform:scale(1.15);
   box-shadow:-3px -3px 6px rgba(255,255,255,.08),4px 4px 10px rgba(0,0,0,.6),
-             0 0 22px rgba(124,58,237,.7);
+             0 0 22px hsl(var(--hue-a) 78% 60% / .7);
 }
 
 /* Dot tick markers — absolute positioned to match exact slider % */
@@ -366,22 +489,22 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
   transition:background .2s,box-shadow .2s,transform .2s;
 }
 .stk:hover .stk-dot{
-  background:#8b5cf6;
-  box-shadow:0 0 10px rgba(124,58,237,.6),var(--r-s);
+  background:var(--accent);
+  box-shadow:0 0 10px hsl(var(--hue-a) 78% 60% / .6),var(--r-s);
   transform:scale(1.3);
 }
 .stk.active .stk-dot{
-  background:#7c3aed;
-  box-shadow:0 0 12px rgba(124,58,237,.7),var(--r-s);
+  background:var(--atmo-a);
+  box-shadow:0 0 12px hsl(var(--hue-a) 78% 60% / .7),var(--r-s);
   transform:scale(1.4);
 }
-.stk.active .stk-lbl{color:#a78bfa}
+.stk.active .stk-lbl{color:var(--accent-light)}
 .stk.active{transform:translateX(-50%)}
 .stk-lbl{
   font-size:.76rem;font-weight:700;letter-spacing:.01em;
   color:rgba(255,255,255,.5);transition:color .2s;
 }
-.stk:hover .stk-lbl{color:#a78bfa}
+.stk:hover .stk-lbl{color:var(--accent-light)}
 
 /* ── Format Pills ────────────────────────────────────────────────────────── */
 .pill-group{display:flex;gap:8px}
@@ -395,29 +518,27 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
   color:#fff;font-weight:600;
   background:var(--accent);
   box-shadow:-3px -3px 8px rgba(255,255,255,.08),4px 4px 12px rgba(0,0,0,.5),
-             0 0 14px rgba(124,58,237,.35);
+             0 0 14px hsl(var(--hue-a) 78% 60% / .35);
 }
 .pill input{display:none}
 
-/* ── Options bar (full-width compact row) ────────────────────────────────── */
+/* ── Options bar — the Output card now lives in the Sound|Output half-width
+   row (see .grid2 in index.html), not full page width, so this stacks its
+   groups vertically instead of laying them out as one long horizontal bar.
+   .opts-sep was a vertical divider between horizontal groups — no longer
+   meaningful in a column layout, so it's hidden rather than restyled. ── */
 .opts-card{ margin-bottom:0; }
 .opts-bar{
-  display:flex;align-items:center;gap:28px;flex-wrap:wrap;
+  display:flex;flex-direction:column;align-items:flex-start;gap:14px;
 }
-.opts-sep{
-  width:1px;height:28px;flex-shrink:0;
-  background:rgba(255,255,255,.07);
-}
-/* Advanced 6-up grid inside expanded section */
+.opts-sep{ display:none; }
+/* Advanced grid — auto-fits 1-2 columns depending on the actual space the
+   Output card has (half the page now, not all of it), instead of a fixed
+   column count tuned for full width. */
 .adv-grid{
   display:grid;
-  grid-template-columns:repeat(3,1fr);
-  gap:22px 28px;
-}
-@media(max-width:700px){
-  .adv-grid{grid-template-columns:1fr}
-  .opts-sep{display:none}
-  .opts-bar{gap:14px}
+  grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:20px 24px;
 }
 
 /* ── Advanced toggle ─────────────────────────────────────────────────────── */
@@ -426,7 +547,7 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
   cursor:pointer;font-size:.78rem;font-weight:500;color:var(--txt-s);
   padding:6px 0;transition:color .2s;
 }
-.adv-btn:hover{color:#8b5cf6}
+.adv-btn:hover{color:var(--accent)}
 .adv-btn .arr{transition:transform .25s;font-size:.68rem}
 .adv-btn.open .arr{transform:rotate(90deg)}
 /* Advanced section — smooth grid expand */
@@ -438,20 +559,20 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 .btn-preview{
   width:38px;height:38px;border-radius:10px;flex-shrink:0;
   border:none;cursor:pointer;background:var(--surface);
-  color:#8b5cf6;font-size:.9rem;
+  color:var(--accent);font-size:.9rem;
   display:flex;align-items:center;justify-content:center;
   box-shadow:var(--r-s);transition:all .2s;padding:0;
 }
 .btn-preview:hover:not(:disabled){
-  color:#a78bfa;
+  color:var(--accent-light);
   box-shadow:-4px -4px 10px rgba(255,255,255,.08),5px 5px 14px rgba(0,0,0,.5);
 }
 .btn-preview:active:not(:disabled){
-  box-shadow:var(--r-i);color:#7c3aed;
+  box-shadow:var(--r-i);color:var(--atmo-a);
 }
 .btn-preview.playing{
-  box-shadow:var(--r-i),0 0 0 1px rgba(124,58,237,.45);
-  color:#a78bfa;
+  box-shadow:var(--r-i),0 0 0 1px hsl(var(--hue-a) 78% 60% / .45);
+  color:var(--accent-light);
 }
 .btn-preview:disabled{color:var(--txt-s);cursor:not-allowed}
 
@@ -459,35 +580,35 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 .btn-start{
   display:block;width:100%;padding:20px;margin-top:4px;
   background:var(--surface);
-  color:#a78bfa;border:none;border-radius:var(--radius);
+  color:var(--accent-light);border:none;border-radius:var(--radius);
   font-size:1rem;font-weight:800;cursor:pointer;letter-spacing:.06em;
   text-transform:uppercase;position:relative;
   box-shadow:
     -5px -5px 14px rgba(255,255,255,.06),
      6px  6px 20px rgba(0,0,0,.72),
-     0 0 0 1px rgba(124,58,237,.18);
+     0 0 0 1px hsl(var(--hue-a) 78% 60% / .18);
   transition:all .2s ease;
   animation:fadeUp .45s .2s ease both;
 }
 /* Pulse ring lives on ::after so it doesn't conflict with hover box-shadow */
 @keyframes btnRing{
-  0%,100%{border-color:rgba(124,58,237,.0);box-shadow:none}
-  50%    {border-color:rgba(124,58,237,.55);box-shadow:0 0 18px rgba(124,58,237,.2)}
+  0%,100%{border-color:hsl(var(--hue-a) 78% 60% / .0);box-shadow:none}
+  50%    {border-color:hsl(var(--hue-a) 78% 60% / .55);box-shadow:0 0 18px hsl(var(--hue-a) 78% 60% / .2)}
 }
 .btn-start::after{
   content:'';position:absolute;inset:-1px;
-  border-radius:inherit;border:1.5px solid rgba(124,58,237,.0);
+  border-radius:inherit;border:1.5px solid hsl(var(--hue-a) 78% 60% / .0);
   pointer-events:none;
 }
 .btn-start:not(:disabled)::after{animation:btnRing 3s 1.5s ease-in-out infinite}
 .btn-start:disabled::after{animation:none}
 .btn-start:hover:not(:disabled){
-  color:#c4b5fd;
+  color:var(--accent-lightest);
   box-shadow:
     -6px -6px 16px rgba(255,255,255,.07),
      7px  7px 22px rgba(0,0,0,.78),
-     0 0 0 1px rgba(124,58,237,.35),
-     0 0 24px rgba(124,58,237,.2);
+     0 0 0 1px hsl(var(--hue-a) 78% 60% / .35),
+     0 0 24px hsl(var(--hue-a) 78% 60% / .2);
   transform:translateY(-2px);
 }
 .btn-start:active:not(:disabled){
@@ -495,11 +616,11 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
   box-shadow:
     inset -3px -3px 8px rgba(255,255,255,.05),
     inset  4px  4px 14px rgba(0,0,0,.75),
-    0 0 0 1px rgba(124,58,237,.25);
-  color:#8b5cf6;
+    0 0 0 1px hsl(var(--hue-a) 78% 60% / .25);
+  color:var(--accent);
 }
 .btn-start:disabled{
-  color:rgba(139,92,246,.3);cursor:not-allowed;
+  color:hsl(var(--hue-a) 100% 71% / .3);cursor:not-allowed;
   box-shadow:
     -3px -3px 8px rgba(255,255,255,.03),
      4px  4px 12px rgba(0,0,0,.6);
@@ -535,7 +656,7 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
   to  {opacity:1;transform:none}
 }
 
-/* 2-column grid below the status card — mirrors .left-grid on settings page */
+/* 2-column grid below the status card, for batch-mode book cards */
 .out-grid{
   display:grid;
   grid-template-columns:3fr 2fr;
@@ -592,23 +713,23 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
   display:flex;align-items:center;gap:10px;
   margin-bottom:18px;padding:12px 18px;
   border-radius:var(--radius-s);cursor:pointer;
-  background:rgba(124,58,237,.12);
-  box-shadow:inset 0 0 0 1px rgba(124,58,237,.25);
-  font-size:.83rem;font-weight:600;color:#c4b5fd;
+  background:hsl(var(--hue-a) 78% 60% / .12);
+  box-shadow:inset 0 0 0 1px hsl(var(--hue-a) 78% 60% / .25);
+  font-size:.83rem;font-weight:600;color:var(--accent-lightest);
   transition:background .2s,box-shadow .2s;
   user-select:none;
 }
-.job-banner:hover{background:rgba(124,58,237,.2);box-shadow:inset 0 0 0 1px rgba(124,58,237,.4)}
+.job-banner:hover{background:hsl(var(--hue-a) 78% 60% / .2);box-shadow:inset 0 0 0 1px hsl(var(--hue-a) 78% 60% / .4)}
 .job-banner-dot{
   width:8px;height:8px;border-radius:50%;flex-shrink:0;
-  background:#a78bfa;
-  box-shadow:0 0 0 0 rgba(167,139,250,.6);
+  background:var(--accent-light);
+  box-shadow:0 0 0 0 hsl(var(--hue-a) 100% 76% / .6);
   animation:bannerPulse 1.4s ease infinite;
 }
 @keyframes bannerPulse{
-  0%  {box-shadow:0 0 0 0   rgba(167,139,250,.6)}
-  70% {box-shadow:0 0 0 7px rgba(167,139,250,0)}
-  100%{box-shadow:0 0 0 0   rgba(167,139,250,0)}
+  0%  {box-shadow:0 0 0 0   hsl(var(--hue-a) 100% 76% / .6)}
+  70% {box-shadow:0 0 0 7px hsl(var(--hue-a) 100% 76% / 0)}
+  100%{box-shadow:0 0 0 0   hsl(var(--hue-a) 100% 76% / 0)}
 }
 
 
@@ -653,7 +774,7 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
   display:flex;flex-direction:column;gap:1px;
 }
 .ol-line{padding:2px 6px;border-radius:5px;color:var(--txt-m);word-break:break-word}
-.ol-send{color:rgba(167,139,250,.8)}                       /* → request  */
+.ol-send{color:hsl(var(--hue-a) 100% 76% / .8)}                       /* → request  */
 .ol-recv{color:rgba(52,211,153,.8)}                        /* ← response */
 .ol-map {color:rgba(251,191,36,.85);background:rgba(251,191,36,.06)} /* character map */
 .ol-err {color:var(--danger)}
@@ -683,14 +804,41 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 }
 .prog-fill{
   height:100%;width:0;border-radius:99px;
-  background:linear-gradient(90deg,#7c3aed,#5b21b6,#7c3aed);
+  background:linear-gradient(90deg,var(--atmo-a),var(--atmo-b),var(--atmo-a));
   background-size:200% 100%;
   transition:width .38s ease;
-  box-shadow:0 0 10px rgba(124,58,237,.5);
+  box-shadow:0 0 10px hsl(var(--hue-a) 78% 60% / .5);
   animation:shimmer 2.5s linear infinite;
 }
 @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .prog-lbl{font-size:.75rem;color:var(--txt-s);min-height:16px}
+
+/* Indeterminate variant — no real percentage to report (preview synthesis is
+   one request/response), just a moving bar to show something is running. */
+.prog-fill.indeterminate{
+  width:35%!important;
+  animation:indeterminate 1.2s ease-in-out infinite;
+}
+@keyframes indeterminate{
+  0%  {transform:translateX(-100%)}
+  100%{transform:translateX(285%)}
+}
+
+/* ── Preview & Tweak log ─────────────────────────────────────────────────── */
+.sample-log{
+  max-height:200px;overflow-y:auto;
+  font-family:'SF Mono',ui-monospace,monospace;
+  font-size:.73rem;line-height:1.7;
+  display:flex;flex-direction:column;gap:1px;
+  background:var(--well);border-radius:var(--radius-s);
+  box-shadow:var(--r-i);padding:8px 10px;
+}
+.sample-log-empty{color:var(--txt-s);padding:2px 6px}
+.sl-line{padding:2px 6px;border-radius:5px;color:var(--txt-m);word-break:break-word}
+.sl-start{color:hsl(var(--hue-a) 100% 76% / .8)}
+.sl-done {color:rgba(52,211,153,.8)}
+.sl-stop {color:var(--warning)}
+.sl-err  {color:var(--danger)}
 
 /* ── Log ─────────────────────────────────────────────────────────────────── */
 .log-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
@@ -708,7 +856,7 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 .ll.ok  {color:#34d399}
 .ll.err {color:#f87171}
 .ll.warn{color:#fbbf24}
-.ll.hd  {color:#8b5cf6;font-weight:700}
+.ll.hd  {color:var(--accent);font-weight:700}
 @keyframes logIn{from{opacity:0;transform:translateX(-3px)}to{opacity:1;transform:none}}
 
 /* ── File list ───────────────────────────────────────────────────────────── */
@@ -725,7 +873,7 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
   transform:translateY(-1px);
 }
 .file-item.full{
-  box-shadow:var(--r-s),0 0 0 1px rgba(124,58,237,.25);
+  box-shadow:var(--r-s),0 0 0 1px hsl(var(--hue-a) 78% 60% / .25);
 }
 @keyframes fileIn{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:none}}
 .fi-ch-label{font-size:.7rem;font-weight:600;color:var(--txt-s);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px}
@@ -749,8 +897,8 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 
 /* ── Drop burst flash ─────────────────────────────────────────────────────── */
 @keyframes dropBurst{
-  0%  {box-shadow:var(--r-i),0 0 0 0 rgba(167,139,250,.5)}
-  45% {box-shadow:var(--r-i),0 0 0 14px rgba(167,139,250,.0);transform:scale(1.012)}
+  0%  {box-shadow:var(--r-i),0 0 0 0 hsl(var(--hue-a) 100% 76% / .5)}
+  45% {box-shadow:var(--r-i),0 0 0 14px hsl(var(--hue-a) 100% 76% / .0);transform:scale(1.012)}
   100%{box-shadow:var(--r-i);transform:scale(1)}
 }
 .upload-zone.drop-flash{animation:dropBurst .45s ease-out}
@@ -776,7 +924,9 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 
 /* ── Book card ───────────────────────────────────────────────────────────── */
 .book-card{
-  background:var(--surface);border-radius:var(--radius);
+  background:linear-gradient(165deg, rgba(255,255,255,.09), rgba(255,255,255,.025)), var(--surface);
+  backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);
+  border-radius:var(--radius);
   padding:22px 24px;box-shadow:var(--r);
   display:flex;flex-direction:column;gap:12px;
   animation:fadeUp .4s ease both;
@@ -800,14 +950,14 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
   font-size:.68rem;font-weight:700;letter-spacing:.03em;
   padding:3px 10px;border-radius:6px;
 }
-.bc-badge.running{background:rgba(124,58,237,.2);color:#a78bfa}
+.bc-badge.running{background:hsl(var(--hue-a) 78% 60% / .2);color:var(--accent-light)}
 .bc-badge.done   {background:rgba(16,185,129,.15);color:var(--success)}
 .bc-badge.error  {background:rgba(239,68,68,.12); color:#f87171}
 .bc-badge.queued {background:rgba(255,255,255,.06);color:var(--txt-m)}
 
 /* Progress bar */
 .bc-bar-wrap{height:4px;border-radius:99px;background:var(--well);box-shadow:var(--r-i);overflow:hidden}
-.bc-bar-fill{height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,#7c3aed,#5b21b6);transition:width .35s ease}
+.bc-bar-fill{height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,var(--atmo-a),var(--atmo-b));transition:width .35s ease}
 .book-card.bc-done .bc-bar-fill{background:var(--success)}
 
 /* Info line */
@@ -815,7 +965,7 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 .book-card.bc-done .bc-info{color:var(--txt-m)}
 
 /* ── Spinner ─────────────────────────────────────────────────────────────── */
-.spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.12);border-top-color:#8b5cf6;border-radius:50%;animation:spin .75s linear infinite}
+.spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.12);border-top-color:var(--accent);border-radius:50%;animation:spin .75s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* ── Entrance stagger ────────────────────────────────────────────────────── */
@@ -848,7 +998,7 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
   transition:box-shadow .2s;
 }
 .ch-cell[data-status="running"]{
-  box-shadow:var(--r-s),0 0 0 1px rgba(124,58,237,.35);
+  box-shadow:var(--r-s),0 0 0 1px hsl(var(--hue-a) 78% 60% / .35);
 }
 .ch-cell[data-status="done"]{
   box-shadow:var(--r-s),0 0 0 1px rgba(16,185,129,.2);
@@ -870,7 +1020,7 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
   padding:2px 7px;border-radius:5px;
 }
 .ch-cell[data-status="pending"]  .ch-cell-badge{background:rgba(255,255,255,.05);color:var(--txt-s)}
-.ch-cell[data-status="running"]  .ch-cell-badge{background:rgba(124,58,237,.2);color:#a78bfa}
+.ch-cell[data-status="running"]  .ch-cell-badge{background:hsl(var(--hue-a) 78% 60% / .2);color:var(--accent-light)}
 .ch-cell[data-status="done"]     .ch-cell-badge{background:rgba(16,185,129,.15);color:var(--success)}
 .ch-cell[data-status="skipped"]  .ch-cell-badge{background:rgba(255,255,255,.03);color:rgba(255,255,255,.2)}
 
@@ -881,12 +1031,12 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 }
 .ch-cell-bar-fill{
   height:100%;border-radius:99px;
-  background:linear-gradient(90deg,#7c3aed,#5b21b6);
+  background:linear-gradient(90deg,var(--atmo-a),var(--atmo-b));
   transition:width .3s ease;
 }
 .ch-cell[data-status="done"] .ch-cell-bar-fill{background:var(--success)}
 .ch-cell[data-status="running"] .ch-cell-bar-fill{
-  background:linear-gradient(90deg,#7c3aed,#9d6fff,#7c3aed);
+  background:linear-gradient(90deg,var(--atmo-a),var(--accent),var(--atmo-a));
   background-size:200% 100%;
   animation:shimmer 2s linear infinite;
 }
@@ -950,6 +1100,151 @@ select:hover,input[type=number]:hover,input[type=text]:hover{background:rgb(30,3
 /* Small spinner for chapter card */
 .spinner-sm{
   display:inline-block;width:13px;height:13px;flex-shrink:0;
-  border:2px solid rgba(255,255,255,.1);border-top-color:#8b5cf6;
+  border:2px solid rgba(255,255,255,.1);border-top-color:var(--accent);
   border-radius:50%;animation:spin .75s linear infinite;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   UX redesign additions — progressive disclosure, plain-language framing,
+   and a few skeuomorphic touches layered onto the existing neumorphic system.
+   Kept as a distinct block so the original component styles above stay easy
+   to diff against; nothing here renames or removes an existing class/id.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+
+/* ── Subpanel — the "nested settings" box pattern (engine-specific fields,
+   Ollama config, etc.), previously duplicated as inline styles per-instance.
+   Consolidated here for visual consistency; JS still toggles element.style
+   .display on these same elements, which composes fine with a class. ── */
+.subpanel{
+  margin-top:10px;padding:14px 16px;border-radius:var(--radius-s);
+  background:rgba(255,255,255,.03);
+  box-shadow:var(--edge);
+}
+
+/* ── Callouts — reassurance / warning banners in plain language, replacing
+   bare colored text so secondary info doesn't read with the same visual
+   weight as a primary label. ── */
+.callout{
+  display:flex;align-items:flex-start;gap:9px;
+  padding:10px 13px;border-radius:var(--radius-s);
+  font-size:.78rem;line-height:1.55;
+}
+.callout::before{flex-shrink:0;font-size:.85rem;line-height:1.4}
+.callout-info{
+  background:hsl(var(--hue-a) 78% 60% / .07);color:var(--txt-m);
+  box-shadow:inset 0 0 0 1px hsl(var(--hue-a) 78% 60% / .16);
+}
+.callout-info::before{content:'💡'}
+.callout-warn{
+  background:rgba(251,191,36,.07);color:rgba(251,191,36,.92);
+  box-shadow:inset 0 0 0 1px rgba(251,191,36,.22);
+}
+.callout-warn::before{content:'⚠';color:rgba(251,191,36,.9)}
+.callout:empty{display:none}
+
+/* ── "Recommended" badge — lets a beginner spot the safe default at a
+   glance instead of having to understand every option to pick one. ── */
+.badge-reco{
+  display:inline-flex;align-items:center;
+  font-size:.6rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+  color:#34d399;background:rgba(16,185,129,.12);
+  padding:2px 7px;border-radius:5px;margin-left:6px;
+}
+
+/* ── Advanced section framing — make it unmistakably optional. ── */
+.adv-btn{font-size:.82rem}
+.adv-hint{
+  font-size:.74rem;color:var(--txt-s);margin:2px 0 0;
+}
+
+/* ── Toggle switches ─────────────────────────────────────────────────────
+   Skeuomorphic touch: the five feature checkboxes in "Voice & Model"
+   (Merge / Transformer G2P / Enhance / Multi-voice / Ambient) read as
+   on/off settings, not a multi-select list — a sliding switch communicates
+   that instantly, mirroring a physical rocker switch. Scoped narrowly to
+   .settings-checks so the *other* use of .chk (chapter multi-select rows,
+   where a checkmark is the correct affordance) is untouched. */
+.settings-checks .chk{gap:11px}
+.settings-checks .chk input[type=checkbox]{
+  width:38px;height:22px;border-radius:99px;
+  background:var(--well);box-shadow:var(--r-i);
+  position:relative;flex-shrink:0;
+}
+.settings-checks .chk input[type=checkbox]::after{
+  content:'';position:absolute;top:3px;left:3px;
+  width:16px;height:16px;border-radius:50%;
+  background:linear-gradient(160deg,#4b4b56,#28282f);
+  box-shadow:0 1px 2px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.04);
+  transition:transform .2s cubic-bezier(.4,0,.2,1),background .2s;
+}
+.settings-checks .chk input[type=checkbox]:checked{
+  background:var(--accent);
+  box-shadow:var(--r-i),0 0 10px hsl(var(--hue-a) 78% 60% / .4);
+}
+.settings-checks .chk input[type=checkbox]:checked::after{
+  transform:translateX(16px);
+  background:linear-gradient(160deg,#fff,#e9e2ff);
+}
+.settings-checks .chk input[type=checkbox]:disabled{opacity:.5;cursor:not-allowed}
+
+/* ── Voice choice ─────────────────────────────────────────────────────────
+   The engine names (Kokoro / Higgs / Chatterbox) never appear here — a
+   non-technical reader has no way to weigh those against each other. The
+   real, meaningful choice underneath is speed vs. a specific voice, so
+   that's the choice shown. The real #engine <select> stays fully intact
+   and functional (still receives focus, still fires onchange) — these two
+   cards just sit next to it as large, tappable proxies that set its value
+   and dispatch a native 'change' event, so every existing listener keeps
+   working unmodified. Falls back gracefully to the plain select if JS is off. */
+.voice-choice{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+@media(max-width:560px){.voice-choice{grid-template-columns:1fr}}
+.vc-opt{
+  font:inherit;-webkit-appearance:none;appearance:none;
+  text-align:left;cursor:pointer;user-select:none;
+  background:var(--surface);border:none;border-radius:var(--radius-s);
+  padding:14px 15px;box-shadow:var(--r-s),var(--edge);
+  transition:box-shadow .2s,transform .15s;
+  display:flex;flex-direction:column;gap:3px;
+}
+.vc-opt:hover{box-shadow:-4px -4px 10px rgba(255,255,255,.08),5px 5px 14px rgba(0,0,0,.5),var(--edge)}
+.vc-opt.active{box-shadow:var(--r-i),0 0 0 1.5px hsl(var(--hue-a) 100% 68% / .55),0 0 18px -6px hsl(var(--hue-a) 100% 68% / .5)}
+.vc-ico{font-size:1.15rem;margin-bottom:3px}
+.vc-title{font-size:.86rem;font-weight:700;color:var(--txt);display:flex;align-items:center;flex-wrap:wrap}
+.vc-sub{font-size:.73rem;color:var(--txt-s);line-height:1.45}
+.engine-select-native{display:none}
+
+/* ── Auto-tune hero — the "sit back and relax" escape hatch, given the
+   most visual weight in the cloning panel rather than being one button
+   among several. ── */
+.autotune-card{
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:16px 18px;border-radius:var(--radius-s);
+  background:linear-gradient(155deg, hsl(var(--hue-a) 100% 68% / .16), hsl(var(--hue-a) 100% 68% / .04));
+  box-shadow:inset 0 0 0 1.5px hsl(var(--hue-a) 100% 68% / .38);
+}
+.autotune-ico{font-size:1.3rem;flex-shrink:0}
+.autotune-txt{flex:1;min-width:180px}
+.autotune-title{font-weight:700;font-size:.87rem;color:var(--txt)}
+.autotune-sub{font-size:.76rem;color:var(--txt-m);margin-top:3px;line-height:1.5}
+.btn-autotune{
+  flex-shrink:0;border:none;border-radius:10px;padding:11px 15px;cursor:pointer;
+  background:linear-gradient(155deg,var(--accent-light),var(--accent));color:#2a0f04;font-weight:700;font-size:.8rem;
+  box-shadow:0 8px 18px -9px hsl(var(--hue-a) 100% 68% / .6);
+}
+
+/* ── Footnote / advanced-link pattern — plain reassurance text with a
+   small, deliberately muted escape hatch for the rare person who wants
+   to override an automatic choice. ── */
+.footnote{font-size:.76rem;color:var(--txt-s);line-height:1.55}
+.advlink{color:var(--txt-s);text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.advlink:hover{color:var(--txt)}
+
+/* ── Mini segmented control — for the rare override (which cloning model)
+   tucked behind the advanced link above. ── */
+.mini-seg{display:flex;gap:7px}
+.mini-seg-opt{
+  font:inherit;flex:1;border:none;cursor:pointer;border-radius:9px;padding:8px 10px;
+  background:var(--well);box-shadow:var(--r-i);color:var(--txt-s);font-size:.76rem;font-weight:600;
+}
+.mini-seg-opt.active{color:#2a0f04;background:linear-gradient(155deg,var(--accent-light),var(--accent));box-shadow:none}

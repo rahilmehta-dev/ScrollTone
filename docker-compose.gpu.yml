@@ -1,0 +1,30 @@
+# NVIDIA GPU passthrough overlay — layer this on top of the base compose file
+# on a Linux host with an NVIDIA GPU and the NVIDIA Container Toolkit installed
+# (https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+#
+# Not merged into docker-compose.yml directly: a `deploy.resources.reservations.
+# devices` block with driver: nvidia makes `docker compose up` refuse to start
+# the backend container at all on a machine without a working NVIDIA GPU
+# runtime — that would break the default, no-GPU path this app is primarily
+# documented to run on (see README/documentation/installation.md). This file
+# is how GPU passthrough gets added, opt-in, without putting that at risk.
+#
+# What this actually unlocks: Higgs Audio V2 already supports cuda/mps/cpu
+# with a fallback chain (backend/engines/higgs_synth.py) — with this overlay
+# active and Higgs set up (documentation/engines.md), /api/config will report
+# "cuda" as an available Processing Device, and Higgs conversions run on the
+# GPU instead of falling back to CPU. Chatterbox stays CPU-only regardless —
+# that's a hardcoded safety measure (confirmed MPS memory leak; CUDA was
+# never validated either), not something this overlay changes.
+services:
+  backend:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

@@ -4,8 +4,10 @@ __pycache__/
 .DS_Store
 /.vtcode
 /vtcode.toml
-.DS_Store
 /__pycache__
 /.venv
-scrolltone_multi_speaker_ambience_prompt.md
-AMBIENCE_SOUNDS.md
+/.venv-higgs
+/.venv-chatterbox
+/tests/output
+/audiobook_output
+/.claude/settings.local.json
