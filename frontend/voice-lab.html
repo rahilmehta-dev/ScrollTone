@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voice Lab — ScrollTone</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  main.lab{max-width:760px;margin:0 auto}
+  .lab-file-list{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+  .lab-file-row{font-size:.8rem;color:var(--txt-m);background:var(--well);padding:6px 10px;border-radius:8px}
+  .voice-card{padding:14px 16px;border-radius:12px;margin-bottom:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);transition:opacity .2s,border-color .2s}
+  .voice-card.pending{opacity:.55}
+  .voice-card.skipped{opacity:.55;border-color:var(--danger)}
+  .voice-card-hdr{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+  .voice-card-title{font-weight:700;font-size:.88rem}
+  .candidate-row{padding:8px 10px;border-radius:8px;margin-bottom:6px;margin-top:8px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05)}
+  .candidate-row.best{border-color:var(--success)}
+  .badge-best{font-size:.6rem;font-weight:800;letter-spacing:.06em;color:var(--success);background:rgba(16,185,129,.12);padding:2px 6px;border-radius:4px}
+  .badge-skip{font-size:.6rem;font-weight:800;letter-spacing:.06em;color:var(--danger);background:rgba(239,68,68,.12);padding:2px 6px;border-radius:4px}
+</style>
+</head>
+<body>
+
+<div class="brand">
+  <div class="brand-inset">
+    <a href="/" style="text-decoration:none"><div class="brand-name">Scroll<em>Tone</em></div></a>
+    <div class="brand-sep"></div>
+    <div class="brand-sub">
+      <span class="brand-sub-top">Voice Lab</span>
+      <span class="brand-sub-bot">Batch Auto-tune</span>
+    </div>
+  </div>
+  <a href="/" class="btn-page-back" style="align-self:center">← Back to ScrollTone</a>
+</div>
+
+<main class="lab">
+
+  <div class="callout callout-info" style="margin-bottom:14px">
+    <span><b>Advanced tool.</b> Voice Lab batch-tests several voice clips and parameter combos automatically. If you just want to convert a book, head back and use the regular <a href="/" class="link-btn" style="margin-left:0">Voice &amp; Model</a> page instead — its defaults already sound good.</span>
+  </div>
+
+  <div class="card">
+    <div class="sect"><span class="sect-ico">🧪</span>Reference Voice Clips</div>
+    <div style="font-size:.81rem;color:var(--txt-m);line-height:1.55;margin-bottom:14px">
+      Upload several candidate voice clips — Auto-tune samples a handful of Chatterbox parameter combos per clip, synthesizes the same short sample text with each, and scores every candidate with an offline audio-quality model (DNSMOS — no human listening needed), so you can compare voice actors/takes side by side instead of tuning one at a time.
+    </div>
+
+    <div class="field">
+      <label>Voice Clips <i class="tip" data-tip="8-20 seconds of clean, single-speaker audio per clip works best; minimum 5s each. Upload 1-8 clips (Cmd/Ctrl-click to select multiple in the file picker).">ⓘ</i></label>
+      <input type="file" id="voice-files" accept="audio/*" multiple onchange="onVoiceFilesChange()">
+      <div class="lab-file-list" id="voice-file-list"></div>
+    </div>
+
+    <div class="field">
+      <label>Candidates per voice <i class="tip" data-tip="How many parameter combos to test per voice clip. More candidates = better coverage of the parameter space but more time — each one is a real synthesis call.">ⓘ</i></label>
+      <input type="number" id="lab-candidates" value="20" min="3" max="30" step="1">
+    </div>
+
+    <div class="field">
+      <label>Sample Seed <i class="tip" data-tip="Seeds the Latin Hypercube sampler — the same seed always produces the same candidate parameter combos (reproducible reruns), and every voice in one batch gets the exact same combos, so scores are directly comparable across voices. Change it to sample a different region of the parameter space.">ⓘ</i></label>
+      <input type="number" id="lab-seed" value="411" step="1">
+    </div>
+
+    <div class="field">
+      <label id="lab-workers-label">Parallel Workers <i class="tip" data-tip="Runs this many candidates concurrently, each its own Chatterbox model instance — CPU-only, well-tested up to 16. ~6.6GB RAM per worker; leave at 1 to run sequentially (safest, slowest) if you're short on RAM.">ⓘ</i></label>
+      <input type="number" id="lab-workers" value="1" min="1" max="16" step="1">
+    </div>
+
+    <div style="display:flex;gap:9px;align-items:center;margin-top:6px;flex-wrap:wrap">
+      <button class="btn-sm" id="lab-run-btn" type="button" onclick="startBatchAutotune()">🎯 Run Auto-tune for all voices</button>
+      <button class="btn-sm" id="lab-stop-btn" type="button" onclick="stopBatchAutotune()" style="display:none;color:var(--danger)">■ Stop</button>
+    </div>
+
+    <div class="prog-track" id="lab-prog-track" style="display:none;margin-top:10px">
+      <div class="prog-fill indeterminate" id="lab-prog-fill"></div>
+    </div>
+    <div id="lab-status" style="font-size:.73rem;color:var(--txt-s);margin-top:6px;min-height:0;white-space:pre-line"></div>
+  </div>
+
+  <div class="card" id="lab-results-card" style="display:none">
+    <div class="sect"><span class="sect-ico">🏆</span>Results</div>
+    <div id="lab-results"></div>
+  </div>
+
+  <div class="card" id="lab-log-card" style="display:none">
+    <div class="sect"><span class="sect-ico">📜</span>Log</div>
+    <div class="sample-log" id="lab-log"></div>
+  </div>
+
+</main>
+
+<div id="toast"></div>
+<script src="/voice-lab.js"></script>
+</body>
+</html>

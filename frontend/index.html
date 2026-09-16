@@ -35,62 +35,163 @@
     Conversion in progress — View Progress →
   </div>
 
-  <!-- ── Row 1: 2-column grid ──────────────────────────────────────────── -->
-  <div class="left-grid">
+  <!-- One continuous page — book, voice, and output settings all in a
+       single scroll, no forward/back gate between them. -->
+  <div class="wizard-page" id="page-1">
 
-    <!-- Col 1 ─ Input & Output ─────────────────────────────────────────── -->
-    <div class="col">
-      <div class="card">
-        <div class="sect">Input &amp; Output</div>
+    <!-- Cover strip — revealed once a single EPUB is loaded and its cover/
+         title/author come back from /api/chapters (backend/epub_parser.py
+         already extracted this for MP3 tagging; this just surfaces it).
+         Falls back to a plain book glyph for .txt uploads, multi-book
+         batches, or EPUBs with no embedded cover. -->
+    <div class="cover-strip" id="cover-strip" style="display:none">
+      <div class="cover-thumb" id="cover-thumb">
+        <img id="cover-img" alt="" style="display:none">
+        <span id="cover-thumb-fallback">📕</span>
+      </div>
+      <div class="cover-strip-txt">
+        <div class="cover-strip-title" id="cover-strip-title">—</div>
+        <div class="cover-strip-author" id="cover-strip-author"></div>
+      </div>
+    </div>
 
-        <!-- EPUB upload -->
-        <div class="field">
-          <label>Books (EPUB) <i class="tip" data-tip="Drop one or more .epub files. Each book is converted separately and saved into its own subfolder.">ⓘ</i></label>
-          <div class="upload-zone" id="drop-zone"
-               onclick="document.getElementById('epub-file').click()">
-            <span class="up-icon">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="color:rgba(255,255,255,.35)">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
-                <line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
-              </svg>
-            </span>
-            <div class="up-title">Drop EPUBs here or click to browse</div>
-            <div class="up-sub">.epub files · select multiple to batch convert</div>
-            <div class="up-name" id="up-name" style="display:none"></div>
-          </div>
-          <input type="file" id="epub-file" accept=".epub" multiple style="display:none">
+    <div class="sect-hdr"><span class="sect-ico">📖</span>Book</div>
+
+    <div class="card">
+
+      <!-- Book / text upload -->
+      <div class="field">
+        <label>Books (EPUB / TXT) <i class="tip" data-tip="Drop one or more .epub or .txt files. Each book is converted separately and saved into its own subfolder.">ⓘ</i></label>
+        <div class="upload-zone" id="drop-zone"
+             onclick="document.getElementById('epub-file').click()">
+          <span class="up-icon">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="color:rgba(255,255,255,.35)">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+              <line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
+            </svg>
+          </span>
+          <div class="up-title">Drop EPUBs or TXT files here or click to browse</div>
+          <div class="up-sub">.epub or .txt files · select multiple to batch convert</div>
+          <div class="up-name" id="up-name" style="display:none"></div>
         </div>
+        <input type="file" id="epub-file" accept=".epub,.txt" multiple style="display:none">
+      </div>
 
-        <div class="div"></div>
+      <div class="div"></div>
 
-        <!-- Output folder -->
+      <!-- Output folder -->
+      <div class="field">
+        <label>Output Folder <i class="tip" data-tip="Where finished audio files are saved. Leave blank to use the default book-title subfolder. Click the folder button to pick a folder on your device.">ⓘ</i></label>
+        <div style="display:flex;gap:9px;align-items:center">
+          <input type="text" id="out_dir" readonly
+                 placeholder="Default — download via browser"
+                 style="flex:1;cursor:default;font-family:inherit">
+          <button class="btn-preview" id="folder-btn" onclick="pickFolder()"
+                  title="Browse for folder" style="flex-shrink:0">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+          </button>
+          <button class="btn-sm" id="clear-device-folder-btn" type="button" onclick="clearDeviceFolder()" style="display:none;flex-shrink:0">✕</button>
+        </div>
+        <div style="font-size:.72rem;color:var(--txt-s);margin-top:5px" id="out-dir-hint">
+          Click the folder button to save files directly to a folder on your Mac.
+        </div>
+        <div style="font-size:.72rem;color:var(--success);margin-top:5px;display:none" id="device-folder-status"></div>
+      </div>
+
+    </div><!-- end Book card -->
+
+    <!-- Chapter selection -->
+    <div class="card ch-card" id="chapter-card" style="display:none">
+      <div class="ch-card-hdr">
+        <div class="sect" style="margin:0"><span class="sect-ico">📑</span>Chapters</div>
+        <div class="ch-card-tools" id="ch-card-tools" style="display:none">
+          <span class="ch-count-lbl" id="ch-count-lbl"></span>
+          <button class="btn-sm" onclick="selectAllChapters(true)">All</button>
+          <button class="btn-sm" onclick="selectAllChapters(false)">None</button>
+        </div>
+      </div>
+      <div class="ch-list" id="ch-list">
+        <div class="ch-loading" id="ch-loading">
+          <span class="spinner-sm"></span> Reading chapters…
+        </div>
+      </div>
+    </div>
+
+    <div class="sect-hdr"><span class="sect-ico">🎙️</span>Voice &amp; Model</div>
+
+    <div class="card">
+
+
         <div class="field">
-          <label>Output Folder <i class="tip" data-tip="Where finished audio files are saved. Leave blank to use the temp folder and download via the browser. Click the folder button to pick any folder on your Mac directly.">ⓘ</i></label>
-          <div style="display:flex;gap:9px;align-items:center">
-            <input type="text" id="out_dir" readonly
-                   placeholder="Default — download via browser"
-                   style="flex:1;cursor:default;font-family:inherit">
-            <button class="btn-preview" id="folder-btn" onclick="pickFolder()"
-                    title="Browse for folder" style="flex-shrink:0">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-              </svg>
+          <label>Narrator <i class="tip" data-tip="Kokoro is fast, lightweight, and runs in-process — the recommended default. Chatterbox clones a voice from a clip you upload, but requires a separate one-time setup (see README) and is far slower than Kokoro (CPU-only, ~6x realtime).">ⓘ</i></label>
+          <!-- Real control — kept fully wired (id, onchange) so every existing
+               listener keeps working. Visually replaced by the plain-language
+               choice below; pickVoiceMode() drives this select and its native
+               'change' event, so it's the single source of truth either way.
+               Higgs Audio V2 support still exists server-side (backend/engines/
+               higgs_synth.py) but isn't offered in this build — see git history
+               if re-enabling it. -->
+          <select id="engine" onchange="toggleEngine()" class="engine-select-native">
+            <option value="kokoro" selected>Kokoro — fast, built-in voices (recommended)</option>
+            <option value="chatterbox">Chatterbox — cloned voice, CPU-only, ~6x slower than realtime</option>
+          </select>
+          <div class="voice-choice" id="voice-choice">
+            <button type="button" class="vc-opt active" id="vc-existing-btn" aria-pressed="true" onclick="pickVoiceMode('existing')">
+              <span class="vc-ico">🎙️</span>
+              <span class="vc-title">Use a Voice<span class="badge-reco">Recommended</span></span>
+              <span class="vc-sub">Ready in seconds — pick from our narrators</span>
+            </button>
+            <button type="button" class="vc-opt" id="vc-clone-btn" aria-pressed="false" onclick="pickVoiceMode('clone')">
+              <span class="vc-ico">✨</span>
+              <span class="vc-title">Clone a Voice</span>
+              <span class="vc-sub">Upload a clip — takes longer, but it's genuinely them</span>
             </button>
           </div>
-          <div style="font-size:.72rem;color:var(--txt-s);margin-top:5px">
-            Click the folder button to save files directly to a folder on your Mac.
+        </div>
+
+        <div id="engine-settings" class="subpanel" style="display:none">
+          <div class="field">
+            <label>Voice Clip <i class="tip" data-tip="A short recording of the voice to clone for narration. 8-20 seconds of clean, single-speaker audio works best; minimum 5s.">ⓘ</i></label>
+            <input type="file" id="reference_audio" accept="audio/*" onchange="showReferenceAudio()">
+            <div id="reference-audio-status" style="font-size:.73rem;color:var(--txt-s);margin-top:4px;min-height:0"></div>
+          </div>
+          <div id="engine-warning" class="callout callout-warn" style="margin-top:8px"></div>
+
+          <!-- Auto-tune: samples a handful of parameter combos against the
+               uploaded reference clip, scores each with an offline audio-
+               quality model (DNSMOS — no human listening needed), and
+               surfaces the best-scoring one. Opt-in (not automatic on
+               upload) since it takes several minutes even in parallel. -->
+          <div class="autotune-card" style="margin-top:14px">
+            <div class="autotune-ico">✨</div>
+            <div class="autotune-txt">
+              <div class="autotune-title">Let us fine-tune it</div>
+              <div class="autotune-sub">Sit back — we'll find the best-sounding settings for you. ~15-20 min.</div>
+            </div>
+            <button class="btn-autotune" id="autotune-btn" type="button" onclick="startAutotune()">Auto-tune this voice</button>
+            <button class="btn-sm" id="autotune-stop-btn" type="button" onclick="stopAutotune()" style="display:none;color:var(--danger)">■ Stop</button>
+          </div>
+          <div style="font-size:.73rem;color:var(--txt-s);margin-top:6px">
+            Comparing multiple clips? Try <a href="/voice-lab.html" class="link-btn" style="margin-left:0">Voice Lab</a>.
+          </div>
+
+          <div class="prog-track" id="autotune-prog-track" style="display:none;margin-top:10px">
+            <div class="prog-fill indeterminate" id="autotune-prog-fill"></div>
+          </div>
+          <div id="autotune-status" style="font-size:.73rem;color:var(--txt-s);margin-top:6px;min-height:0;white-space:pre-line"></div>
+
+          <div id="autotune-results" style="display:none;margin-top:10px"></div>
+
+          <div id="autotune-log-wrap" style="display:none">
+            <div class="div" style="margin:10px 0"></div>
+            <div style="font-size:.73rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-s);margin-bottom:8px">Auto-tune Log</div>
+            <div class="sample-log" id="autotune-log"></div>
           </div>
         </div>
 
-      </div>
-    </div><!-- end col 1 -->
-
-    <!-- Col 2 ─ Voice & Settings ───────────────────────────────────────── -->
-    <div class="col" style="height:100%">
-      <div class="card" style="flex:1;display:flex;flex-direction:column">
-        <div class="sect">Voice &amp; Narration</div>
-
-        <div class="field">
+        <div class="field" id="kokoro-voice-field">
           <label>Narrator Voice <i class="tip" data-tip="The narrator's voice. In multi-voice mode, characters are assigned different voices automatically — this is used for narration only. Grades in parentheses are Kokoro's official per-voice quality grades (A best, F worst) — af_heart (A) is warm and expressive, the best-graded voice overall.">ⓘ</i></label>
           <div style="display:flex;gap:9px;align-items:center">
             <select id="voice" style="flex:1" onchange="stopPreview()">
@@ -134,40 +235,48 @@
 
         <input type="hidden" id="lang" value="a">
 
-        <div class="div"></div>
+      </div><!-- end Narrator card -->
+
+      <!-- Sound and Output sit side by side — two related but independent
+           groups of settings, not one long card, so the page uses the
+           width it has instead of stacking everything in a single column. -->
+      <div class="grid2">
+
+      <div class="card">
+        <div class="sect"><span class="sect-ico">🔊</span>Sound</div>
 
         <!-- Key settings — promoted out of Advanced -->
         <div class="settings-checks">
           <label class="chk">
             <input type="checkbox" id="merge" checked>
-            Merge chapters
+            🔗 Merge chapters
             <i class="tip" data-tip="Produces one combined audiobook file in addition to the individual chapter files. Ideal for loading into Overcast, Pocket Casts, or Apple Books.">ⓘ</i>
           </label>
-          <label class="chk">
+          <label class="chk" id="trf-field">
             <input type="checkbox" id="trf" checked>
-            Transformer G2P
-            <i class="tip" data-tip="Uses a transformer model for better pronunciation of unusual words and names. Downloads 457 MB on first use, 2–4× slower.">ⓘ</i>
+            🗣️ Better Pronunciation
+            <i class="tip" data-tip="'Transformer G2P' — uses a transformer model for better pronunciation of unusual words and names. Downloads 457 MB on first use, 2–4× slower. Kokoro-only — Higgs/Chatterbox don't use Kokoro's G2P pipeline.">ⓘ</i>
           </label>
           <label class="chk">
             <input type="checkbox" id="enhance" checked>
-            Enhance Audio
+            🎚️ Enhance Audio
             <i class="tip" data-tip="Applies compression + EQ via ffmpeg for a broadcast-ready sound. Requires ffmpeg on PATH.">ⓘ</i>
           </label>
           <label class="chk">
             <input type="checkbox" id="multi_voice" onchange="toggleMultiVoice()">
-            Multi-voice
+            🎭 Multi-voice
             <span style="font-size:.58rem;font-weight:800;letter-spacing:.08em;color:rgba(251,191,36,.85);background:rgba(251,191,36,.1);padding:2px 6px;border-radius:4px;margin-left:2px">BETA</span>
             <i class="tip" data-tip="Uses a local LLM via Ollama to detect dialogue speakers and assign different voices to each character. Requires Ollama running locally.">ⓘ</i>
           </label>
           <label class="chk">
             <input type="checkbox" id="ambience" onchange="toggleAmbience()">
-            Ambient sound
+            🌊 Ambient sound
             <span style="font-size:.58rem;font-weight:800;letter-spacing:.08em;color:rgba(251,191,36,.85);background:rgba(251,191,36,.1);padding:2px 6px;border-radius:4px;margin-left:2px">BETA</span>
             <i class="tip" data-tip="Uses a local LLM via Ollama to detect ambient scene cues (rain, wind, ocean, fire, forest, crowd) and mixes a quiet looping background bed under the narration. Requires Ollama running locally. Bundled ambience loops are procedurally generated, not third-party recordings — see AMBIENCE_SOUNDS.md.">ⓘ</i>
           </label>
         </div>
 
-        <div id="mv-settings" style="display:none;margin-top:10px;padding:12px 14px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)">
+        <div id="mv-settings" class="subpanel" style="display:none">
           <div class="field">
             <label>Ollama URL</label>
             <input type="text" id="ollama_url" value="http://localhost:11434" style="font-family:monospace;font-size:.82rem" placeholder="http://localhost:11434">
@@ -182,16 +291,12 @@
             </select>
           </div>
         </div>
+      </div><!-- end Sound card -->
 
-      </div><!-- end Voice card -->
-
-      <!-- Output Settings sits below Voice card -->
   <div class="card opts-card">
     <div class="opts-bar">
 
-      <div class="sect" style="margin:0;flex-shrink:0">Output</div>
-
-      <div class="opts-sep"></div>
+      <div class="sect" style="margin:0;flex-shrink:0"><span class="sect-ico">⚙️</span>Output</div>
 
       <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
         <span style="font-size:.8rem;font-weight:600;color:var(--txt-m);display:flex;align-items:center;gap:5px">Format <i class="tip" data-tip="WAV = lossless, larger files (~5× bigger). MP3 = smaller with embedded cover art, title, author tags — great for music apps.">ⓘ</i></span>
@@ -215,10 +320,8 @@
         </select>
       </div>
 
-      <div class="opts-sep"></div>
-
       <button class="adv-btn" id="adv-btn" onclick="toggleAdv()" style="margin:0;flex-shrink:0">
-        <span class="arr">▶</span> Advanced
+        <span class="arr">▶</span> Advanced (optional)
       </button>
 
     </div><!-- end opts-bar -->
@@ -227,9 +330,10 @@
     <div class="adv-wrap" id="adv-body">
       <div>
       <div style="margin-top:18px;padding-top:16px;border-top:1px solid rgba(255,255,255,.05)">
+        <div class="adv-hint" style="margin-bottom:14px">🔧 Only if you want to fine-tune it — the defaults already sound good.</div>
         <div class="adv-grid">
-          <div class="field">
-            <label>Speech Speed <i class="tip" data-tip="1.0× is natural pace. Try 0.75× for technical books or non-native listeners. 1.25–1.5× works well for fiction. Above 1.75× can sound rushed.">ⓘ</i></label>
+          <div class="field" id="speed-field">
+            <label>Speed <i class="tip" data-tip="1.0× is natural pace. Try 0.75× for technical books or non-native listeners. 1.25–1.5× works well for fiction. Above 1.75× can sound rushed.">ⓘ</i></label>
             <div class="speed-header">
               <div class="speed-val" id="speed-val">0.95×</div>
             </div>
@@ -246,25 +350,52 @@
             </div>
           </div>
           <div class="field">
-            <label>Processing Device <i class="tip" data-tip="Auto uses Metal (MPS) on Apple Silicon — fast and efficient. CPU works everywhere but is slower. CUDA is for Nvidia GPU on Linux/Windows.">ⓘ</i></label>
+            <label>Where This Runs <i class="tip" data-tip="Auto picks the fastest option this device actually has. Options here are limited to what this server can actually use — e.g. a Linux Docker container never offers Apple Silicon (MPS).">ⓘ</i></label>
             <select id="device">
               <option value="auto" selected>Auto — best available</option>
-              <option value="mps">Apple Silicon (MPS)</option>
               <option value="cpu">CPU only</option>
-              <option value="cuda">CUDA GPU</option>
             </select>
           </div>
           <div class="field">
-            <label>Max Chunk (chars) <i class="tip" data-tip="Long text is split into chunks before being sent to the TTS model. Smaller chunks = more natural sentence breaks. 500 is a good default; reduce to 300 if you hear awkward cuts.">ⓘ</i></label>
+            <label>Text Chunking <i class="tip" data-tip="Long text is split into pieces before being sent to the TTS model. Smaller pieces sound more natural but take longer. 500 characters is a good default; reduce to 300 if you hear awkward cuts.">ⓘ</i></label>
             <input type="number" id="chunk_size" value="500" min="100" max="2000">
           </div>
           <div class="field">
-            <label>Chapter Silence (s) <i class="tip" data-tip="Gap of silence inserted between chapters in the merged file. 1 s is natural. Increase to 2–3 s if you want a clear pause between chapters.">ⓘ</i></label>
+            <label>Pause Between Chapters <i class="tip" data-tip="Gap of silence inserted between chapters in the merged file, in seconds. 1s is natural. Increase to 2–3s if you want a clear pause between chapters.">ⓘ</i></label>
             <input type="number" id="silence" value="1.0" min="0" max="10" step="0.5">
           </div>
           <div class="field">
-            <label>Min Chapter Length <i class="tip" data-tip="Chapters shorter than this number of characters are skipped. Prevents generating audio for copyright pages, blank sections, and table-of-contents entries.">ⓘ</i></label>
+            <label>Skip Short Sections <i class="tip" data-tip="Chapters shorter than this number of characters are skipped entirely. Prevents generating audio for copyright pages, blank sections, and table-of-contents entries.">ⓘ</i></label>
             <input type="number" id="min_ch_len" value="200" min="50" max="2000">
+          </div>
+          <div class="field" id="kokoro-workers-field">
+            <label>Parallel Processing <i class="tip" data-tip="Uses more of this machine's CPU cores at once to finish faster, at the cost of more memory. Leave at 1 for the common case — each additional worker uses roughly another 1.5GB of RAM.">ⓘ</i></label>
+            <input type="number" id="kokoro_workers" value="1" min="1" max="16" step="1">
+            <div id="kokoro-workers-hint" style="font-size:.73rem;color:var(--txt-s);margin-top:4px"></div>
+          </div>
+          <div class="field" id="chatterbox-workers-field" style="display:none">
+            <label>Parallel Processing <i class="tip" data-tip="Runs more copies at once to finish faster, on machines with CPU/RAM to spare. RAM use scales linearly — each additional worker peaks around 6-7GB.">ⓘ</i></label>
+            <input type="number" id="chatterbox_workers" value="1" min="1" max="16" step="1">
+            <div id="chatterbox-workers-hint" style="font-size:.73rem;color:var(--txt-s);margin-top:4px"></div>
+          </div>
+          <div class="field" id="chatterbox-speed-field" style="display:none">
+            <label>Speed <i class="tip" data-tip="Slows the finished audio down afterward (tone/pitch unchanged) — lower = slower. 1.0 = untouched output. Try 0.85–0.9 if it sounds too fast.">ⓘ</i></label>
+            <input type="number" id="chatterbox_speed" value="1.0" min="0.5" max="1.5" step="0.05">
+          </div>
+          <div class="field" id="chatterbox-cfg-field" style="display:none">
+            <label>Expressiveness <i class="tip" data-tip="More natural and varied ↔ calmer and more consistent. Lower is more expressive but drifts further from the reference tone; higher is calmer and more literal but can sound monotone. Default 0.3 favors expressiveness.">ⓘ</i></label>
+            <input type="number" id="chatterbox_cfg_weight" value="0.3" min="0" max="1" step="0.05">
+          </div>
+          <div class="field" id="chatterbox-exaggeration-field" style="display:none">
+            <label>Emotional Intensity <i class="tip" data-tip="~0.5 is neutral. Higher adds more dynamic range and emotion; too high (past ~1.2) can distort or sound unstable. Default 0.7 is a natural-sounding middle ground.">ⓘ</i></label>
+            <input type="number" id="chatterbox_exaggeration" value="0.7" min="0.1" max="2" step="0.05">
+          </div>
+          <div class="field" id="chatterbox-temperature-field" style="display:none">
+            <label>Variation <i class="tip" data-tip="Same delivery every time ↔ changes naturally line to line. Higher fights the 'reading a script' sameness, but too high risks slurring or artifacts. Default 0.8.">ⓘ</i></label>
+            <input type="number" id="chatterbox_temperature" value="0.8" min="0.05" max="1.5" step="0.05">
+          </div>
+          <div class="field" id="chatterbox-breaths-field" style="display:none">
+            <label><input type="checkbox" id="chatterbox_breaths" checked style="width:auto;margin-right:6px">Natural Breathing <i class="tip" data-tip="Without this, chunks are stitched back-to-back with dead silence, which sounds rushed. When on, a short synthesized breath sound is spliced between paragraph-like boundaries instead, for a more natural, podcast-like cadence.">ⓘ</i></label>
           </div>
         </div>
       </div>
@@ -272,29 +403,43 @@
     </div>
   </div><!-- end opts-card -->
 
-    </div><!-- end col 2 -->
-  </div><!-- end left-grid -->
+      </div><!-- end grid2 (Sound | Output) -->
 
-  <!-- ── Row 2 (full-width): Chapter selection ─────────────────────────── -->
-  <div class="card ch-card" id="chapter-card" style="display:none">
-    <div class="ch-card-hdr">
-      <div class="sect" style="margin:0">Chapters</div>
-      <div class="ch-card-tools" id="ch-card-tools" style="display:none">
-        <span class="ch-count-lbl" id="ch-count-lbl"></span>
-        <button class="btn-sm" onclick="selectAllChapters(true)">All</button>
-        <button class="btn-sm" onclick="selectAllChapters(false)">None</button>
+    <!-- Preview & Tweak — right after picking voice/model/params, before Run -->
+    <div class="card" id="preview-card">
+      <div class="sect"><span class="sect-ico">▶️</span>Preview &amp; Tweak</div>
+      <div style="font-size:.81rem;color:var(--txt-m);line-height:1.55;margin-bottom:12px">
+        A shared sample — not your book — so voices can be compared fairly.
+        <button type="button" class="link-btn" id="sample-text-toggle" onclick="toggleSampleText()">Read the sample text</button>
+      </div>
+      <div id="sample-text-box" style="display:none"></div>
+
+      <div style="display:flex;gap:9px;align-items:center">
+        <button class="btn-sm" id="sample-preview-btn" type="button" onclick="previewSample()">▶ Preview Voice</button>
+        <button class="btn-sm" id="sample-stop-btn" type="button" onclick="stopSamplePreview()" style="display:none;color:var(--danger)">■ Stop</button>
+        <audio id="sample-preview-audio" controls style="display:none;height:32px;flex:1"></audio>
+      </div>
+
+      <!-- Indeterminate progress bar — synthesis is a single request/response,
+           so there's no real percentage to show, just that it's running. -->
+      <div class="prog-track" id="sample-prog-track" style="display:none;margin-top:10px">
+        <div class="prog-fill indeterminate" id="sample-prog-fill"></div>
+      </div>
+      <div id="sample-preview-status" style="font-size:.73rem;color:var(--txt-s);margin-top:6px;min-height:0;white-space:pre-line"></div>
+
+      <!-- Log of preview attempts — start/stop, with the engine/model + parameter values used -->
+      <div class="div"></div>
+      <div style="font-size:.73rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-s);margin-bottom:8px">Preview Log</div>
+      <div class="sample-log" id="sample-log">
+        <div class="sample-log-empty" id="sample-log-empty">No previews run yet.</div>
       </div>
     </div>
-    <div class="ch-list" id="ch-list">
-      <div class="ch-loading" id="ch-loading">
-        <span class="spinner-sm"></span> Reading chapters…
-      </div>
-    </div>
-  </div>
 
-  <button class="btn-start" id="start-btn" onclick="startJob()">
-    Start Converting
-  </button>
+    <button class="btn-start" id="start-btn" onclick="startJob()">
+      Start Converting
+    </button>
+
+  </div><!-- end page-1 (Book + Voice & Model, one continuous page) -->
 
 </div>
 
@@ -304,7 +449,7 @@
   <!-- Back bar -->
   <div class="back-bar">
     <button class="btn-back" onclick="backToSettings()">← Settings</button>
-    <span class="out-title">Output</span>
+    <span class="out-title">🎧 Your Audiobook</span>
   </div>
 
   <!-- ── Status + progress ──────────────────────────────────────────────── -->
@@ -323,7 +468,7 @@
   <!-- ── Chapter progress ───────────────────────────────────────────────── -->
   <div class="card ch-prog-wrap" id="ch-prog-wrap" style="display:none">
     <div class="ch-prog-hdr">
-      <div class="sect" style="margin:0">Chapters</div>
+      <div class="sect" style="margin:0"><span class="sect-ico">📑</span>Chapters</div>
       <span class="ch-prog-summary" id="ch-prog-summary"></span>
     </div>
     <div class="ch-prog-grid" id="ch-prog-grid"></div>
@@ -341,7 +486,7 @@
   <!-- ── Ollama attribution log (multi-voice only) ────────────────────────── -->
   <div class="card ollama-log-card" id="ollama-log-card" style="display:none">
     <div class="ch-prog-hdr">
-      <div class="sect" style="margin:0">LLM Attribution</div>
+      <div class="sect" style="margin:0"><span class="sect-ico">🧠</span>LLM Attribution</div>
       <span class="ch-prog-summary" id="ollama-log-summary"></span>
     </div>
     <div class="ollama-log" id="ollama-log"></div>
@@ -350,10 +495,15 @@
   <!-- Batch mode: book cards rendered here -->
   <div class="out-grid" id="out-grid"></div>
 
-  <!-- Log + file-list kept alive but invisible -->
+  <!-- ── Files ready (single-book mode) ──────────────────────────────────── -->
+  <div class="card" id="files-card" style="display:none">
+    <div class="sect" style="margin:0 0 10px"><span class="sect-ico">📁</span>Your Files</div>
+    <div class="file-list" id="file-list"></div>
+  </div>
+
+  <!-- Raw conversion log — kept for internal bookkeeping, not shown -->
   <div aria-hidden="true" style="display:none">
     <div id="log"></div>
-    <div id="file-list"></div>
   </div>
 
 </div>

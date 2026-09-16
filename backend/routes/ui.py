@@ -1,9 +1,14 @@
 """
 UI system routes.
 
-GET /config       — return runtime config (e.g. whether running inside Docker)
-GET /pick-folder  — open a native OS folder-picker and return the chosen path
-POST /shutdown    — stop the server process
+GET /config        — return runtime config (e.g. whether running inside Docker)
+GET /sample-text   — the shared preview sample text (see backend/voices.py)
+GET /pick-folder   — open a native OS folder-picker and return the chosen path
+                     (native/non-Docker runs only — see frontend/app.js
+                     chooseDeviceFolder() for how Docker picks a save folder:
+                     the browser's own File System Access API, since the
+                     container can't reach an arbitrary host path itself)
+POST /shutdown     — stop the server process
 """
 import os
 import subprocess
@@ -12,15 +17,39 @@ import threading
 
 from fastapi import APIRouter
 
-import backend.state as state
+from backend.voices import PREVIEW_JOB_TEXT
 
 router = APIRouter()
 
 
 @router.get("/config")
 def config():
-    """Return runtime configuration flags for the frontend."""
-    return {"docker": os.path.exists("/.dockerenv")}
+    """Return runtime configuration flags for the frontend, including which
+    Processing Device options actually make sense to offer — e.g. a Linux
+    Docker container can never have Apple Silicon's MPS, so don't list it."""
+    devices = ["auto", "cpu"]
+    try:
+        import torch
+        if torch.cuda.is_available():
+            devices.append("cuda")
+        if torch.backends.mps.is_available():
+            devices.append("mps")
+    except Exception:
+        pass
+    return {
+        "docker": os.path.exists("/.dockerenv"),
+        "cpu_count": os.cpu_count() or 1,
+        "devices": devices,
+    }
+
+
+@router.get("/sample-text")
+def sample_text():
+    """The text the Preview & Tweak job actually synthesizes (see
+    backend/voices.py PREVIEW_JOB_TEXT), so the UI can display it without
+    duplicating the string — and without showing text longer than what's
+    really spoken."""
+    return {"text": PREVIEW_JOB_TEXT}
 
 
 @router.get("/pick-folder")

@@ -2,25 +2,29 @@
 Conversion job execution.
 
 Responsibilities:
-- convert_book()     : full EPUB-to-audio pipeline for one book, run in a
-                        background thread so it doesn't block the event loop
-- process_chapter()  : per-chapter synthesis (nested closure inside convert_book)
+- convert_book() : full EPUB-to-audio pipeline for one book, run in a
+                    background thread so it doesn't block the event loop.
+                    Reads the book, then hands each chapter to a
+                    ChapterProcessor (backend/chapter_processor.py) and
+                    merges the results.
 
 Chapters are processed one at a time, in order, on a single Kokoro pipeline.
 """
 import asyncio
-import json
 import os
 import re
 from pathlib import Path
 
-import backend.state as state
-from backend.epub_parser import _find_epub_cover, extract_chapters, get_book_metadata
-from backend.audio import write_wav, to_mp3, enhance_wav
-from backend.voices import VoiceMapper, REGISTRY_FILENAME
-from backend.attribution import attribute_speakers
-from backend.ambience import detect_ambience_cues
-from backend.mixing import build_ambience_track, mix_ambience_under_narration, normalize_loudness
+from backend.epub_parser import (
+    _find_epub_cover,
+    extract_chapters,
+    extract_chapters_from_text,
+    get_book_metadata,
+)
+from backend.audio import write_wav, to_mp3, enhance_wav, change_tempo
+from backend.voices import VoiceMapper, REGISTRY_FILENAME, PREVIEW_JOB_TEXT
+from backend.job_events import JobEmitter
+from backend.chapter_processor import ChapterProcessor
 
 SAMPLE_RATE = 24000   # Kokoro output sample rate
 
@@ -33,15 +37,10 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
 
     Sends None to the queue when complete so the SSE generator can close.
     """
-
-    # ── Push helpers ──────────────────────────────────────────────────────────
-    def _push(data: dict):
-        loop.call_soon_threadsafe(job_state["queue"].put_nowait, json.dumps(data))
-
-    def log(msg: str):            _push({"type": "log",      "msg": msg})
-    def status(msg: str):         _push({"type": "status",   "msg": msg})
-    def prog(value, label=""):    _push({"type": "progress", "value": value, "label": label})
-    def done():                   loop.call_soon_threadsafe(job_state["queue"].put_nowait, None)
+    emitter = JobEmitter(job_state, loop)
+    log, status, prog, push, done = (
+        emitter.log, emitter.status, emitter.progress, emitter.push, emitter.done,
+    )
 
     try:
         import psutil
@@ -63,30 +62,61 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
 
         memlog("startup")
 
-        # Load the pipeline for this job
-        status("Loading pipeline…")
-        log(f"Initializing pipeline  lang={settings['lang_code']}  trf={settings['trf']}")
-        pipeline = KPipeline(lang_code=settings["lang_code"],
-                              repo_id="hexgrad/Kokoro-82M",
-                              trf=settings["trf"], device=settings["device"])
-        memlog("after pipeline loaded")
-        log(f"Model ready  |  voice={settings['voice']}  speed={settings['speed']:.2f}×\n")
+        engine = settings.get("engine", "kokoro")
 
-        # Read and parse EPUB
-        status("Reading EPUB…")
-        log(f"Reading: {settings['filename']}")
-        book = epub.read_epub(settings["epub"])
-
-        metadata = get_book_metadata(book)
-        settings["book_title_meta"]  = metadata["title"]
-        settings["book_author_meta"] = metadata["author"]
-        settings["cover_data"], settings["cover_mime"] = _find_epub_cover(book)
-        if settings["cover_data"]:
-            log(f"Cover image found ({len(settings['cover_data']) // 1024} KB, {settings['cover_mime']})")
+        # Kokoro's pipeline is only needed when it's the active engine (or for
+        # Multi-voice, which stays Kokoro-only — the /convert route rejects
+        # multi_voice=true combined with a non-Kokoro engine, so that combo
+        # never reaches here). Higgs/Chatterbox run out-of-process entirely
+        # (backend/engines/runner.py), so skip loading Kokoro's model at all
+        # when it won't be used — avoids an unnecessary load and, if
+        # Transformer G2P is on, an unnecessary extra weights download.
+        pipeline = None
+        if engine == "kokoro" or settings.get("multi_voice"):
+            status("Loading pipeline…")
+            log(f"Initializing pipeline  lang={settings['lang_code']}  trf={settings['trf']}")
+            pipeline = KPipeline(lang_code=settings["lang_code"],
+                                  repo_id="hexgrad/Kokoro-82M",
+                                  trf=settings["trf"], device=settings["device"])
+            memlog("after pipeline loaded")
+            log(f"Model ready  |  voice={settings['voice']}  speed={settings['speed']:.2f}×\n")
         else:
-            log("No cover image found in EPUB")
+            workers_key = f"{engine}_workers"
+            workers = settings.get(workers_key, 1) if engine in ("chatterbox", "higgs") else 1
+            worker_note = f"  |  {workers} parallel workers" if workers > 1 else ""
+            log(f"Engine: {engine}  |  reference={Path(settings['reference_wav']).name}{worker_note}\n")
+            for warning in settings.get("reference_warnings", []):
+                log(f"   ! [reference] {warning}")
 
-        chapters = extract_chapters(book, settings["min_ch_len"])
+        # Read and parse the source book (.epub or .txt)
+        is_txt = Path(settings["source_path"]).suffix.lower() == ".txt"
+
+        if is_txt:
+            status("Reading text file…")
+            log(f"Reading: {settings['filename']}")
+            settings["book_title_meta"]  = ""
+            settings["book_author_meta"] = ""
+            settings["cover_data"], settings["cover_mime"] = None, "image/jpeg"
+            log("No cover image (plain text upload)")
+
+            with open(settings["source_path"], encoding="utf-8", errors="ignore") as text_file:
+                raw_text = text_file.read()
+            chapters = extract_chapters_from_text(raw_text, settings["min_ch_len"])
+        else:
+            status("Reading EPUB…")
+            log(f"Reading: {settings['filename']}")
+            book = epub.read_epub(settings["source_path"])
+
+            metadata = get_book_metadata(book)
+            settings["book_title_meta"]  = metadata["title"]
+            settings["book_author_meta"] = metadata["author"]
+            settings["cover_data"], settings["cover_mime"] = _find_epub_cover(book)
+            if settings["cover_data"]:
+                log(f"Cover image found ({len(settings['cover_data']) // 1024} KB, {settings['cover_mime']})")
+            else:
+                log("No cover image found in EPUB")
+
+            chapters = extract_chapters(book, settings["min_ch_len"])
 
         selected_indices = settings.get("chapter_indices")
         if selected_indices is not None:
@@ -94,20 +124,19 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
             chapters = [chapter for index, chapter in enumerate(chapters) if index in selected_indices_set]
 
         if not chapters:
-            log("No chapters found in EPUB.")
+            log("No chapters found in the uploaded file.")
             job_state["status"] = "error"
             done(); return
 
         log(f"Found {len(chapters)} chapters\n")
         # Seed the chapter progress grid in the UI
-        _push({"type": "ch_info",
-               "chapters": [{"i": index, "title": chapter_title}
-                            for index, (chapter_title, _) in enumerate(chapters)]})
+        push({"type": "ch_info",
+              "chapters": [{"i": index, "title": chapter_title}
+                           for index, (chapter_title, _) in enumerate(chapters)]})
 
         book_stem     = re.sub(r"[^\w\s-]", "", Path(settings["filename"]).stem)[:50]
         silence_array = np.zeros(int(SAMPLE_RATE * settings["silence"]), dtype=np.float32)
-
-        done_count = 0
+        breath_rng    = np.random.default_rng()
 
         # ── Voice mapper (shared across all chapters for consistency, and ─────
         #    persisted to out_dir so a later re-run for more chapters of the
@@ -129,186 +158,14 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
         if ambience_enabled:
             log(f"Ambient sound enabled  |  model={settings['ollama_model']}  url={settings['ollama_url']}\n")
 
-        def _split_chunks(text: str) -> list[str]:
-            sentences = re.split(r"(?<=[.!?])\s+", text)
-            chunks, current_chunk = [], ""
-            for sentence in sentences:
-                if len(current_chunk) + len(sentence) + 1 <= settings["chunk_size"]:
-                    current_chunk = (current_chunk + " " + sentence).strip()
-                else:
-                    if current_chunk: chunks.append(current_chunk)
-                    current_chunk = sentence
-            if current_chunk: chunks.append(current_chunk)
-            return chunks
-
-        # ── Per-chapter synthesis ───────────────────────────────────────────────
-        def process_chapter(chapter_index, title, text):
-            nonlocal done_count
-            if job_state["stop_event"].is_set():
-                raise StopIteration
-
-            chapter_number = chapter_index + 1
-            total_chapters = len(chapters)
-            log(f"── Chapter {chapter_number}/{total_chapters}: {title}")
-            log(f"   {len(text):,} chars")
-
-            chapter_audio = []
-
-            # ── Chapter title announcement ────────────────────────────────
-            # Prepend: 0.5 s silence → spoken title → 0.75 s silence
-            try:
-                title_frames = []
-                for _, _, audio in pipeline(title, voice=settings["voice"], speed=settings["speed"]):
-                    title_frames.append(audio)
-                if title_frames:
-                    chapter_audio.append(np.zeros(int(SAMPLE_RATE * 0.5), dtype=np.float32))
-                    chapter_audio.extend(title_frames)
-                    chapter_audio.append(np.zeros(int(SAMPLE_RATE * 0.75), dtype=np.float32))
-            except Exception as title_error:
-                log(f"   ! Title announcement skipped: {title_error}")
-
-            if voice_mapper:
-                # ── Multi-voice path ──────────────────────────────────────
-                # One LLM call per chapter to attribute all dialogue
-                log(f"   [Ollama] → {settings['ollama_model']}  "
-                    f"({len(text):,} chars, {settings['ollama_url']})")
-                try:
-                    segments = attribute_speakers(
-                        text, settings["ollama_url"], settings["ollama_model"],
-                        known_characters=voice_mapper.known_names(),
-                    )
-                    dialogue = [segment for segment in segments if segment["type"] == "dialogue"]
-                    narration = [segment for segment in segments if segment["type"] == "narration"]
-                    log(f"   [Ollama] ← {len(segments)} segments  "
-                        f"({len(dialogue)} dialogue, {len(narration)} narration)")
-                    # Log each new character assignment
-                    for segment in dialogue:
-                        speaker = segment.get("speaker")
-                        gender  = segment.get("gender") or "?"
-                        if speaker:
-                            voice = voice_mapper.get_voice(speaker, segment.get("gender"))
-                            preview = segment["text"][:60].replace("\n", " ")
-                            log(f"   [Ollama]   {speaker} ({gender}) → {voice}  \"{preview}…\"")
-                    log(f"   Characters so far: {voice_mapper.summary()}")
-                    voice_mapper.save(registry_path)
-                except Exception as error:
-                    log(f"   [Ollama] ! Attribution failed: {error}")
-                    log(f"   [Ollama] ! Falling back to single voice ({settings['voice']})")
-                    segments = [{"type": "narration", "text": text,
-                                 "speaker": None, "gender": None}]
-
-                # Flatten segments → sub-chunks with per-chunk voice
-                voice_chunks = []
-                for segment in segments:
-                    segment_text = segment.get("text", "").strip()
-                    if not segment_text:
-                        continue
-                    voice = voice_mapper.get_voice(segment.get("speaker"), segment.get("gender"))
-                    for sub_chunk in _split_chunks(segment_text):
-                        voice_chunks.append((voice, sub_chunk))
-
-                total_chunks      = len(voice_chunks)
-                progress_interval = max(1, total_chunks // 20)
-                _push({"type": "ch_start", "ch_i": chapter_index, "chunks": total_chunks})
-
-                for chunk_index, (voice, chunk) in enumerate(voice_chunks):
-                    if job_state["stop_event"].is_set():
-                        raise StopIteration
-                    try:
-                        for _, _, audio in pipeline(chunk, voice=voice, speed=settings["speed"]):
-                            chapter_audio.append(audio)
-                    except StopIteration:
-                        raise
-                    except Exception as error:
-                        log(f"   ! Ch{chapter_number} chunk {chunk_index + 1} skipped: {error}")
-                    if (chunk_index + 1) % progress_interval == 0 or chunk_index == total_chunks - 1:
-                        _push({"type": "ch_prog", "ch_i": chapter_index,
-                               "pct": round((chunk_index + 1) / total_chunks, 3)})
-
-            else:
-                # ── Single-voice path (original) ──────────────────────────
-                chunks             = _split_chunks(text)
-                total_chunks       = len(chunks)
-                progress_interval  = max(1, total_chunks // 20)
-                log(f"   {total_chunks} chunks")
-                _push({"type": "ch_start", "ch_i": chapter_index, "chunks": total_chunks})
-
-                for chunk_index, chunk in enumerate(chunks):
-                    if job_state["stop_event"].is_set():
-                        raise StopIteration
-                    try:
-                        for _, _, audio in pipeline(chunk, voice=settings["voice"], speed=settings["speed"]):
-                            chapter_audio.append(audio)
-                    except StopIteration:
-                        raise
-                    except Exception as error:
-                        log(f"   ! Ch{chapter_number} chunk {chunk_index + 1} skipped: {error}")
-                    if (chunk_index + 1) % progress_interval == 0 or chunk_index == total_chunks - 1:
-                        _push({"type": "ch_prog", "ch_i": chapter_index,
-                               "pct": round((chunk_index + 1) / total_chunks, 3)})
-
-            if not chapter_audio:
-                log(f"   (no audio generated)\n")
-                _push({"type": "ch_skip", "ch_i": chapter_index})
-                return (chapter_index, None, None, 0.0)
-
-            combined_audio = np.concatenate(chapter_audio)
-
-            if ambience_enabled:
-                try:
-                    cues = detect_ambience_cues(text, settings["ollama_url"], settings["ollama_model"])
-                    ambience_log[str(chapter_index)] = {"title": title, "cues": cues}
-                    ambience_log_path.write_text(json.dumps(ambience_log, indent=2))
-                    if cues:
-                        log(f"   [Ambience] " + ", ".join(
-                            f"{c['cue']}@{c['confidence']:.2f}" for c in cues))
-                        ambience_track = build_ambience_track(
-                            cues, len(text), len(combined_audio), SAMPLE_RATE)
-                        if ambience_track is not None:
-                            combined_audio = mix_ambience_under_narration(
-                                combined_audio, ambience_track, SAMPLE_RATE)
-                            log(f"   [Ambience] mixed under narration ({len(combined_audio)/SAMPLE_RATE:.1f}s)")
-                    else:
-                        log("   [Ambience] no clear cue for this chapter — narration only")
-                except Exception as error:
-                    log(f"   [Ambience] ! Detection/mixing skipped: {error}")
-
-            combined_audio = normalize_loudness(combined_audio)
-
-            safe_title     = re.sub(r"[^\w\s-]", "", title)[:35].strip()
-            wav_filename   = f"{book_stem}_{safe_title}.wav"
-            wav_path       = os.path.join(settings["out_dir"], wav_filename)
-            write_wav(wav_path, combined_audio, SAMPLE_RATE)
-
-            if settings.get("enhance"):
-                try:
-                    enhance_wav(wav_path)
-                except Exception as error:
-                    log(f"   ! Enhancement skipped (Ch{chapter_number}): {error}")
-
-            if settings.get("output_format") == "mp3":
-                filename = f"{book_stem}_{safe_title}.mp3"
-                to_mp3(wav_path, os.path.join(settings["out_dir"], filename),
-                       settings["bitrate"],
-                       title=title,
-                       album=settings.get("book_title_meta") or book_stem,
-                       artist=settings.get("book_author_meta", ""),
-                       track=chapter_number,
-                       cover_data=settings.get("cover_data"),
-                       cover_mime=settings.get("cover_mime", "image/jpeg"))
-                os.remove(wav_path)
-            else:
-                filename = wav_filename
-
-            duration = len(combined_audio) / SAMPLE_RATE
-            log(f"   Saved: {filename}  ({duration:.1f}s)\n")
-
-            done_count += 1
-            prog(done_count / total_chapters, f"{done_count}/{total_chapters} chapters done")
-
-            _push({"type": "file", "filename": filename,
-                   "duration": duration, "chapter": chapter_number, "title": title})
-            return (chapter_index, filename, combined_audio, duration)
+        chapter_processor = ChapterProcessor(
+            job_state=job_state, settings=settings, emitter=emitter,
+            engine=engine, pipeline=pipeline, voice_mapper=voice_mapper,
+            registry_path=registry_path, ambience_enabled=ambience_enabled,
+            ambience_log=ambience_log, ambience_log_path=ambience_log_path,
+            book_stem=book_stem, total_chapters=len(chapters), breath_rng=breath_rng,
+            sample_rate=SAMPLE_RATE,
+        )
 
         # ── Execution — one chapter at a time, in order ─────────────────────────
         results: dict = {}
@@ -317,7 +174,7 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
             if job_state["stop_event"].is_set():
                 break
             try:
-                result = process_chapter(chapter_index, title, text)
+                result = chapter_processor.process(chapter_index, title, text)
                 results[result[0]] = result
             except StopIteration:
                 job_state["status"] = "cancelled"
@@ -353,6 +210,12 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
             wav_path     = os.path.join(settings["out_dir"], wav_filename)
             write_wav(wav_path, full_audio, SAMPLE_RATE)
 
+            if engine == "chatterbox" and settings.get("chatterbox_speed", 1.0) != 1.0:
+                try:
+                    change_tempo(wav_path, settings["chatterbox_speed"])
+                except Exception as error:
+                    log(f"! Speed adjustment skipped (FULL): {error}")
+
             if settings.get("enhance"):
                 try:
                     enhance_wav(wav_path)
@@ -375,7 +238,7 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
             minutes = len(full_audio) / SAMPLE_RATE / 60
             log(f"Full audiobook saved — {minutes:.1f} min")
             job_state["files"].append(filename)
-            _push({
+            push({
                 "type": "file", "filename": filename,
                 "duration": len(full_audio) / SAMPLE_RATE, "chapter": 0,
                 "title": "Full Audiobook (Merged)",
@@ -383,6 +246,92 @@ def convert_book(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoo
 
         memlog("done")
         log(f"\nDone! {len(job_state['files'])} file(s) created.")
+        job_state["status"] = "done"
+        done()
+
+    except Exception as error:
+        import traceback
+        log(f"\nError: {error}")
+        log(traceback.format_exc())
+        job_state["status"] = "error"
+        done()
+
+
+def run_preview_job(job_state: dict, settings: dict, loop: asyncio.AbstractEventLoop) -> None:
+    """Preview & Tweak's synthesis job — same job/SSE machinery as
+    convert_book() (routes/convert.py's /stream, /stop, /download all work
+    unchanged on the job_id this produces), but for one synthetic "chapter":
+    backend/voices.py PREVIEW_JOB_TEXT, instead of a real uploaded book.
+
+    This is what lets the preview exercise Multi-voice/Ambient sound exactly
+    as a real conversion would (same ChapterProcessor, same Ollama calls),
+    and reports real chunk-by-chunk progress + honors a real server-side
+    Stop — not just an abandoned client-side fetch.
+    """
+    emitter = JobEmitter(job_state, loop)
+    log, status, push, done = emitter.log, emitter.status, emitter.push, emitter.done
+
+    try:
+        engine = settings["engine"]
+
+        pipeline = None
+        if engine == "kokoro" or settings.get("multi_voice"):
+            status("Loading pipeline…")
+            # Reuse the same per-language pipeline cache the quick voice-
+            # audition button warms (backend/voices.py) — repeated Preview
+            # clicks while tweaking parameters would otherwise reload the
+            # whole model from scratch every single time.
+            import backend.state as state
+            lang = settings["lang_code"]
+            with state._preview_lock:
+                if lang not in state._preview_pipeline:
+                    from kokoro import KPipeline
+                    state._preview_pipeline[lang] = KPipeline(
+                        lang_code=lang, repo_id="hexgrad/Kokoro-82M", device=settings["device"])
+                pipeline = state._preview_pipeline[lang]
+            log(f"Model ready  |  voice={settings['voice']}  speed={settings['speed']:.2f}×\n")
+        else:
+            workers_key = f"{engine}_workers"
+            workers = settings.get(workers_key, 1) if engine in ("chatterbox", "higgs") else 1
+            worker_note = f"  |  {workers} parallel workers" if workers > 1 else ""
+            log(f"Engine: {engine}  |  reference={Path(settings['reference_wav']).name}{worker_note}\n")
+            for warning in settings.get("reference_warnings", []):
+                log(f"   ! [reference] {warning}")
+
+        import numpy as np
+        breath_rng = np.random.default_rng()
+
+        voice_mapper = VoiceMapper(settings["voice"]) if settings.get("multi_voice") else None
+        registry_path = Path(settings["out_dir"]) / REGISTRY_FILENAME
+        if voice_mapper:
+            log(f"Multi-voice enabled  |  narrator={settings['voice']}  "
+                f"model={settings['ollama_model']}  url={settings['ollama_url']}\n")
+
+        ambience_enabled = bool(settings.get("ambience"))
+        ambience_log_path = Path(settings["out_dir"]) / "ambience_cues.json"
+        if ambience_enabled:
+            log(f"Ambient sound enabled  |  model={settings['ollama_model']}  url={settings['ollama_url']}\n")
+
+        chapter_processor = ChapterProcessor(
+            job_state=job_state, settings=settings, emitter=emitter,
+            engine=engine, pipeline=pipeline, voice_mapper=voice_mapper,
+            registry_path=registry_path, ambience_enabled=ambience_enabled,
+            ambience_log={}, ambience_log_path=ambience_log_path,
+            book_stem="preview", total_chapters=1, breath_rng=breath_rng,
+            sample_rate=SAMPLE_RATE, announce_title=False,
+        )
+        push({"type": "ch_info", "chapters": [{"i": 0, "title": "Preview Sample"}]})
+        status("Synthesizing preview…")
+
+        try:
+            chapter_processor.process(0, "Preview Sample", PREVIEW_JOB_TEXT)
+        except StopIteration:
+            log("\nStopped by user.")
+            job_state["status"] = "cancelled"
+            done()
+            return
+
+        log("\nDone.")
         job_state["status"] = "done"
         done()
 
